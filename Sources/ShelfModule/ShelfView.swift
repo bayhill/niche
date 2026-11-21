@@ -78,7 +78,7 @@ struct ShelfCard: View {
     var body: some View {
         let kind = ShelfItemKind.of(item)
         Button { module.reveal(item) } label: {
-            GlassCard {
+            GlassCard(hoverable: true) {
                 SectionHeader(kind.label, symbol: kind.symbol)
                 picture(kind)
                 Text(item.name).notchStyle(.body).lineLimit(1).truncationMode(.middle)
@@ -88,14 +88,9 @@ struct ShelfCard: View {
                     AgeText(date: item.addedAt)
                 }
             }
-            .overlay {
-                RoundedRectangle(cornerRadius: Tokens.Radius.card, style: .continuous)
-                    .fill(hovering ? Tokens.Colors.hairline : .clear)
-                    .allowsHitTesting(false)
-            }
         }
         .buttonStyle(CardPressStyle())
-        .fileDragSource([item.url])
+        .fileDragSource([item.url])  // exactly this card's file
         .overlay(alignment: .topTrailing) {
             if hovering {
                 GlassIconButton("xmark", label: "Remove from shelf", kind: .plain, size: 20) { module.remove(item.id) }

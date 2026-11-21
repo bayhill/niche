@@ -89,18 +89,24 @@ public final class ShelfModule: NotchModule, ShelfAccepting {
         running = true
         log = context.log
         if !isFixture {
+            // The store is ready before the first suspension point: anything added from here on (or before start)
+            // is saved together with what was already on disk, so a later start never loses or overwrites items.
             let url = ShelfFiles.storeURL(in: context.directories)
+            list.replace(with: list.items + ShelfFiles.load(from: url))
             storeURL = url
-            let loaded = await Task.detached { ShelfFiles.resolve(ShelfFiles.load(from: url)) }.value
-            // Anything added before start (unlikely) stays in front of what was saved.
-            list.replace(with: list.items + loaded)
             save()
             schedulePruning()
+            context.log.notice("started")
+            // Then drop entries whose file is gone and follow moved files, off the main actor.
+            await prune()
+        } else {
+            context.log.notice("started")
         }
-        context.log.notice("started")
     }
 
+    /// Flushes the list to disk and stops background work. `start` on the same instance resumes.
     public func stop() {
+        save()
         running = false
         pruneTask?.cancel(); pruneTask = nil
         activityTask?.cancel(); activityTask = nil

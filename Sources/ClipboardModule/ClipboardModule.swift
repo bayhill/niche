@@ -37,6 +37,8 @@ public final class ClipboardModule: NotchModule {
     /// Number of text entries kept; image entries scale with it (see `ClipboardLimits(historySize:)`).
     public static let historySizeKey = SettingsKey<Int>("clipboard.historySize", default: 50)
     public static let historySizes = [10, 25, 50]
+    /// Put files copied in Finder on the Shelf. Off by default: the Shelf keeps its items on disk until they are removed.
+    public static let filesToShelfKey = SettingsKey<Bool>("clipboard.filesToShelf", default: false)
 
     public let id: ModuleID = .clipboard
     public let title = "Clipboard"
@@ -143,11 +145,19 @@ public final class ClipboardModule: NotchModule {
         context.log.notice("started")
     }
 
+    /// Stops polling at once and, outside fixtures, forgets every clip: a switched-off module keeps nothing.
+    /// `start` on the same instance picks up again from the settings.
     public func stop() {
         running = false
         stopPolling()
         confirmTask?.cancel(); confirmTask = nil
         confirmedID = nil
+        guard !isFixture else { return }
+        history.clear()
+        thumbnails.removeAll()
+        status = .off
+        lastChangeCount = nil
+        ownChangeCount = nil
     }
 
     // MARK: User actions
@@ -261,17 +271,14 @@ public final class ClipboardModule: NotchModule {
             return
         }
         let app = frontmostApp()
-        switch ClipboardPolicy.evaluate(pasteboard, frontmostBundleID: app?.bundleID, limits: history.limits) {
+        let acceptFiles = context?.settings.get(Self.filesToShelfKey) == true && context?.services.shelf != nil
+        switch ClipboardPolicy.evaluate(pasteboard, frontmostBundleID: app?.bundleID, limits: history.limits, acceptFiles: acceptFiles) {
         case .skip(let reason):
             lastSkip = reason
         case .files(let urls):
-            // Finder copies go to the Shelf as references; they never become clipboard entries.
-            if let shelf = context?.services.shelf {
-                lastSkip = nil
-                shelf.add(urls, origin: .clipboard)
-            } else {
-                lastSkip = .unsupported
-            }
+            // Opted in: Finder copies go to the Shelf as references; they never become clipboard entries.
+            lastSkip = nil
+            context?.services.shelf?.add(urls, origin: .clipboard)
         case .record(let content):
             lastSkip = nil
             record(content, from: app?.name)

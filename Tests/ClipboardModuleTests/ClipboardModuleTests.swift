@@ -396,8 +396,21 @@ private let png = TestImage.data(TestImage.solid(width: 4, height: 3))
         #expect(h.module.entries[1].kind == .link(display: "apple.com"))
     }
 
-    @Test func finderFilesGoToTheShelfNotTheHistory() async throws {
+    @Test func finderFilesAreSkippedByDefault() async throws {
         let h = try Harness(); defer { h.finish() }
+        await h.startMonitoring()
+        #expect(h.env.settings.get(ClipboardModule.filesToShelfKey) == false)
+        h.pasteboard.copy(files: [URL(fileURLWithPath: "/tmp/a.pdf")])
+        h.module.poll()
+        #expect(h.module.entries.isEmpty)
+        #expect(h.env.shelf.added.isEmpty)
+        #expect(h.module.lastSkip == .files)
+        #expect(h.pasteboard.contentReads == 1)  // the type list only; the URLs are not read
+    }
+
+    @Test func finderFilesGoToTheShelfWhenOptedIn() async throws {
+        let h = try Harness(); defer { h.finish() }
+        h.env.settings.set(ClipboardModule.filesToShelfKey, true)
         await h.startMonitoring()
         let files = [URL(fileURLWithPath: "/tmp/a.pdf"), URL(fileURLWithPath: "/tmp/b c.png")]
         h.pasteboard.copy(files: files)
@@ -410,6 +423,7 @@ private let png = TestImage.data(TestImage.solid(width: 4, height: 3))
 
     @Test func concealedFilesAreNotShelved() async throws {
         let h = try Harness(); defer { h.finish() }
+        h.env.settings.set(ClipboardModule.filesToShelfKey, true)
         await h.startMonitoring()
         h.pasteboard.copy(files: [URL(fileURLWithPath: "/tmp/secret.key")], markers: ["org.nspasteboard.ConcealedType"])
         h.module.poll()
@@ -420,11 +434,57 @@ private let png = TestImage.data(TestImage.solid(width: 4, height: 3))
     @Test func filesWithoutAShelfAreSkipped() async throws {
         let h = try Harness(); defer { h.finish() }
         h.env.services.shelf = nil
+        h.env.settings.set(ClipboardModule.filesToShelfKey, true)
         await h.startMonitoring()
         h.pasteboard.copy(files: [URL(fileURLWithPath: "/tmp/a.txt")])
         h.module.poll()
         #expect(h.module.entries.isEmpty)
-        #expect(h.module.lastSkip == .unsupported)
+        #expect(h.module.lastSkip == .files)
+    }
+
+    @Test func stopStopsPollingAndForgetsClips() async throws {
+        let h = try Harness(pollInterval: .milliseconds(10)); defer { h.finish() }
+        await h.startMonitoring()
+        h.pasteboard.copy(text: "kept until stop")
+        h.module.poll()
+        #expect(h.module.entries.count == 1)
+        h.module.stop()
+        #expect(h.module.entries.isEmpty)
+        #expect(h.module.status == .off)
+        let reads = h.pasteboard.reads
+        h.pasteboard.copy(text: "after stop")
+        h.module.poll()
+        try await Task.sleep(for: .milliseconds(80))
+        #expect(h.pasteboard.reads == reads)
+        #expect(h.module.entries.isEmpty)
+    }
+
+    @Test func startAfterStopResumesOnTheSameInstance() async throws {
+        let h = try Harness(); defer { h.finish() }
+        await h.startMonitoring()
+        h.pasteboard.copy(text: "before stop")
+        h.module.poll()
+        h.module.stop()
+        h.pasteboard.copy(text: "while stopped")
+        await h.start()
+        #expect(h.module.status == .monitoring)  // still enabled, and macOS allows silent reads
+        #expect(h.module.entries.isEmpty)
+        h.module.poll()
+        #expect(h.module.entries.isEmpty)  // what was copied while stopped is not recorded
+        h.pasteboard.copy(text: "after restart")
+        h.module.poll()
+        #expect(h.texts() == ["after restart"])
+    }
+
+    @Test func sampleKeepsItsClipsAcrossStop() async throws {
+        let env = try TestEnvironment(); defer { env.cleanUp() }
+        let module = ClipboardModule.sample()
+        let count = module.entries.count
+        await module.start(env.context(for: .clipboard))
+        module.stop()
+        await module.start(env.context(for: .clipboard))
+        #expect(module.entries.count == count)
+        module.stop()
     }
 
     @Test func removeForgetsOneEntry() async throws {
@@ -550,7 +610,8 @@ private let png = TestImage.data(TestImage.solid(width: 4, height: 3))
         named.clearContents()
         named.writeObjects([file as NSURL])
         #expect(adapter.fileURLs() == [file])
-        #expect(ClipboardPolicy.evaluate(adapter, frontmostBundleID: nil, limits: ClipboardLimits()) == .files([file]))
+        #expect(ClipboardPolicy.evaluate(adapter, frontmostBundleID: nil, limits: ClipboardLimits()) == .skip(.files))
+        #expect(ClipboardPolicy.evaluate(adapter, frontmostBundleID: nil, limits: ClipboardLimits(), acceptFiles: true) == .files([file]))
     }
 }
 

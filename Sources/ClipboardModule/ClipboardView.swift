@@ -119,7 +119,7 @@ struct ClipCard: View {
     var body: some View {
         let confirmed = module.confirmedID == entry.id
         Button { module.copy(entry) } label: {
-            GlassCard(highlighted: confirmed) {
+            GlassCard(highlighted: confirmed, hoverable: true) {
                 SectionHeader(entry.kind.label, symbol: confirmed ? "checkmark" : entry.kind.symbol) {
                     // Space for the header actions, which sit outside the button.
                     Color.clear.frame(width: 1)
@@ -130,11 +130,6 @@ struct ClipCard: View {
                     Spacer(minLength: Tokens.Spacing.xs)
                     AgeText(date: entry.copiedAt)
                 }
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: Tokens.Radius.card, style: .continuous)
-                    .fill(hovering && !confirmed ? Tokens.Colors.hairline : .clear)
-                    .allowsHitTesting(false)
             }
         }
         .buttonStyle(CardPressStyle())
@@ -258,9 +253,17 @@ struct ClipboardSettings: View {
                 }
             } footer: {
                 Text(
-                    "History stays in memory and is never written to disk. Files copied in Finder go to the Shelf. "
-                        + "Not recorded: copies marked private or transient (passwords), anything copied while 1Password, "
-                        + "Bitwarden, Passwords or Keychain Access is in front, text over 100 KB and images over 20 MB."
+                    "History stays in memory and is never written to disk. Not recorded: copies marked private or "
+                        + "transient (passwords), anything copied while 1Password, Bitwarden, Passwords or Keychain Access "
+                        + "is in front, text over 100 KB and images over 20 MB."
+                )
+            }
+            Section {
+                Toggle("Add files copied in Finder to the Shelf", isOn: settings.binding(ClipboardModule.filesToShelfKey))
+            } footer: {
+                Text(
+                    "When off, copied files are ignored. When on, each file copied in Finder is added to the Shelf as a "
+                        + "reference; Shelf items are kept on disk, including after a restart, until removed from the Shelf."
                 )
             }
             if module.status == .denied {

@@ -245,6 +245,57 @@ private func files(_ env: TestEnvironment, _ names: [String]) throws -> [URL] {
         shelf.stop()
     }
 
+    @Test func stopFlushesTheList() async throws {
+        let env = try TestEnvironment(); defer { env.cleanUp() }
+        let shelf = makeShelf()
+        await shelf.start(env.context(for: .shelf))
+        shelf.add(try files(env, ["a.txt", "b.txt"]), origin: .dropped)
+        let store = ShelfFiles.storeURL(in: env.directories)
+        try FileManager.default.removeItem(at: store)
+        shelf.stop()
+        #expect(ShelfFiles.load(from: store).map(\.name) == ["a.txt", "b.txt"])
+    }
+
+    @Test func startAfterStopOnTheSameInstance() async throws {
+        let env = try TestEnvironment(); defer { env.cleanUp() }
+        let shelf = makeShelf()
+        let urls = try files(env, ["a.txt", "b.txt"])
+        await shelf.start(env.context(for: .shelf))
+        shelf.add([urls[0]], origin: .dropped)
+        shelf.stop()
+        await shelf.start(env.context(for: .shelf))
+        #expect(shelf.items.map(\.name) == ["a.txt"])
+        await shelf.handleDrop(DropPayload(items: [.file(urls[1])]))
+        #expect(shelf.items.map(\.name) == ["b.txt", "a.txt"])
+        #expect(shelf.liveActivity != nil)
+        #expect(ShelfFiles.load(from: ShelfFiles.storeURL(in: env.directories)).map(\.name) == ["b.txt", "a.txt"])
+        shelf.stop()
+    }
+
+    @Test func enabledLaterKeepsSavedItemsAndEverythingAdded() async throws {
+        let env = try TestEnvironment(); defer { env.cleanUp() }
+        let urls = try files(env, ["old.txt", "early.txt", "during.txt"])
+        let store = ShelfFiles.storeURL(in: env.directories)
+        let previous = makeShelf()
+        await previous.start(env.context(for: .shelf))
+        previous.add([urls[0]], origin: .dropped)
+        previous.stop()
+
+        // A shelf switched on long after launch: something (Convert) adds before its first start...
+        let shelf = makeShelf()
+        shelf.add([urls[1]], origin: .converted)
+        #expect(ShelfFiles.load(from: store).map(\.name) == ["old.txt"])  // not written over before the store is loaded
+        // ...and a drop lands while start is still checking files in the background.
+        let starting = Task { await shelf.start(env.context(for: .shelf)) }
+        for _ in 0..<1000 where shelf.items.count < 2 { await Task.yield() }
+        await shelf.handleDrop(DropPayload(items: [.file(urls[2])]))
+        #expect(ShelfFiles.load(from: store).map(\.name) == ["during.txt", "early.txt", "old.txt"])
+        await starting.value
+        #expect(shelf.items.map(\.name) == ["during.txt", "early.txt", "old.txt"])
+        #expect(ShelfFiles.load(from: store).map(\.name) == ["during.txt", "early.txt", "old.txt"])
+        shelf.stop()
+    }
+
     @Test func kindLabels() {
         func kind(_ name: String, size: Int64? = 1, origin: ShelfOrigin = .dropped) -> String {
             ShelfItemKind.of(ShelfItem(path: "/tmp/\(name)", origin: origin, addedAt: .now, size: size)).label

@@ -110,6 +110,8 @@ public enum ClipboardSkip: Sendable, Equatable {
     case passwordManager(bundleID: String)
     /// Colours, files with no shelf to take them, or anything else that is not text or an image.
     case unsupported
+    /// Files copied in Finder while "files to Shelf" is off (or no Shelf is running). Their URLs are not read.
+    case files
     case empty
     case tooLarge
 }
@@ -145,12 +147,16 @@ public enum ClipboardPolicy {
     /// Decides what to do with the pasteboard's current contents, reading as little as possible:
     /// nothing at all for a password manager, only the type list for marked or unsupported copies.
     @MainActor
-    public static func evaluate(_ pasteboard: some PasteboardAccessing, frontmostBundleID: String?, limits: ClipboardLimits) -> Outcome {
+    /// - Parameter acceptFiles: return `.files` for Finder copies; otherwise they are skipped without reading their URLs.
+    public static func evaluate(
+        _ pasteboard: some PasteboardAccessing, frontmostBundleID: String?, limits: ClipboardLimits, acceptFiles: Bool = false
+    ) -> Outcome {
         if let app = frontmostBundleID, passwordManagerBundleIDs.contains(app) { return .skip(.passwordManager(bundleID: app)) }
 
         let types = pasteboard.types()
         if let marker = types.first(where: privateMarkerTypes.contains) { return .skip(.markedPrivate(type: marker)) }
         if types.contains(PasteboardTypes.fileURL) {
+            guard acceptFiles else { return .skip(.files) }
             let urls = pasteboard.fileURLs()
             return urls.isEmpty ? .skip(.unsupported) : .files(urls)
         }
