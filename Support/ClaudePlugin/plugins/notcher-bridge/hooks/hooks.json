@@ -1,0 +1,139 @@
+{
+  "description": "Copies each event's JSON into Notcher's spool folder. Silent, and a no-op while Notcher's alerts are off.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/bash",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/forward.sh"
+            ],
+            "async": true,
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/bash",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/forward.sh"
+            ],
+            "async": true,
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/bash",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/forward.sh"
+            ],
+            "async": true,
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/bash",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/forward.sh"
+            ],
+            "async": true,
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/bash",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/forward.sh"
+            ],
+            "async": true,
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/bash",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/forward.sh"
+            ],
+            "async": true,
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/bash",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/forward.sh"
+            ],
+            "async": true,
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "StopFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/bash",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/forward.sh"
+            ],
+            "async": true,
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/bash",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/forward.sh"
+            ],
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
