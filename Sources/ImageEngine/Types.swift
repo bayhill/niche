@@ -55,8 +55,14 @@ public enum ConversionError: Error, Sendable, Equatable, CustomStringConvertible
     case unsupported
     /// The input is already WebP; nothing was written.
     case alreadyWebP
-    /// The file is missing, truncated or corrupt.
+    /// The file is missing or corrupt.
     case decodeFailed
+    /// The file is cut off or empty (still downloading or being written).
+    case incomplete
+    /// A cloud placeholder whose content is not on this Mac.
+    case notDownloaded
+    /// The conversion was cancelled; nothing was written.
+    case cancelled
     /// The source has more pixels than the engine will hold in memory.
     case tooLarge
     /// libwebp failed; `code` is its `WebPEncodingError` (or a `WebPMuxError` offset by -100).
@@ -70,6 +76,9 @@ public enum ConversionError: Error, Sendable, Equatable, CustomStringConvertible
         case .unsupported: "Not a supported image"
         case .alreadyWebP: "Already WebP"
         case .decodeFailed: "Couldn\u{2019}t read image"
+        case .incomplete: "File is incomplete"
+        case .notDownloaded: "Not downloaded from iCloud"
+        case .cancelled: "Cancelled"
         case .tooLarge: "Image too large"
         case .encodeFailed(let code): "Encoding failed (\(code))"
         case .writeFailed: "Couldn\u{2019}t save"

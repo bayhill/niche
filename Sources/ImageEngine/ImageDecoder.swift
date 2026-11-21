@@ -38,22 +38,31 @@ public enum ImageDecoder {
     /// `min(maxPixelEdge, webPMaxEdge)`.
     public static func load(_ source: ImageSource, maxPixelEdge: Int?, includeMetadata: Bool = false) throws(ConversionError) -> DecodedImage {
         let options = [kCGImageSourceShouldCache: false] as CFDictionary
-        let created: CGImageSource?
+        let bytes: Data
         var extensionType: UTType?
         switch source {
         case .file(let url):
             extensionType = UTType(filenameExtension: url.pathExtension.lowercased())
-            created = CGImageSourceCreateWithURL(url as CFURL, options)
+            // Never read a cloud placeholder: reading would block on a download, or decode a stub.
+            if let problem = FileAvailability.problem(at: url) { throw problem }
+            guard let mapped = try? Data(contentsOf: url, options: .alwaysMapped) else { throw .decodeFailed }
+            bytes = mapped
         case .data(let data, _):
-            created = CGImageSourceCreateWithData(data as CFData, options)
+            bytes = data
         }
+        guard !bytes.isEmpty else { throw .incomplete }
 
-        guard let src = created, let type = CGImageSourceGetType(src) as String? else {
+        guard let src = CGImageSourceCreateWithData(bytes as CFData, options), let type = CGImageSourceGetType(src) as String? else {
             if let t = extensionType, !t.conforms(to: .image) { throw .unsupported }
             throw .decodeFailed
         }
         if UTType(type)?.conforms(to: .webP) == true { throw .alreadyWebP }
         if let t = UTType(type), !t.conforms(to: .image) { throw .unsupported }
+        // ImageIO reports most cut-off files as complete and decodes the missing part as blank, so the
+        // container structure is checked as well.
+        guard CGImageSourceGetStatus(src) == .statusComplete, CGImageSourceGetStatusAtIndex(src, 0) == .statusComplete,
+              ImageCompleteness.isComplete(bytes, type: UTType(type))
+        else { throw .incomplete }
         let frameCount = CGImageSourceGetCount(src)
         guard frameCount > 0,
               let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any],
@@ -87,12 +96,34 @@ public enum ImageDecoder {
             ]
             image = CGImageSourceCreateThumbnailAtIndex(src, 0, thumbOptions as CFDictionary)
         } else {
-            image = CGImageSourceCreateImageAtIndex(src, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary)
+            // Not cached: the pixels decode straight into the encoder's raster when it draws the image.
+            image = CGImageSourceCreateImageAtIndex(src, 0, options)
         }
         guard let image, image.width > 0, image.height > 0 else { throw .decodeFailed }
 
         let exif = includeMetadata ? exifPayload(from: props, size: PixelSize(width: image.width, height: image.height)) : nil
         return DecodedImage(image: image, originalPixelSize: original, typeIdentifier: type, frameCount: frameCount, exif: exif, notes: notes)
+    }
+
+    /// Source and output pixel counts from the header alone (no decode), for memory admission.
+    /// `nil` when the header cannot be read; the conversion will report why.
+    public static func estimatePixels(_ source: ImageSource, maxPixelEdge: Int?) -> (source: Int, output: Int)? {
+        let src: CGImageSource?
+        switch source {
+        case .file(let url):
+            guard FileAvailability.problem(at: url) == nil else { return nil }
+            src = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary)
+        case .data(let data, _):
+            src = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary)
+        }
+        guard let src, let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any],
+              let w = (props[kCGImagePropertyPixelWidth] as? NSNumber)?.intValue,
+              let h = (props[kCGImagePropertyPixelHeight] as? NSNumber)?.intValue, w > 0, h > 0
+        else { return nil }
+        let limit = Double(min(maxPixelEdge.map { max(1, $0) } ?? Int.max, webPMaxEdge))
+        let scale = min(1, limit / Double(max(w, h)))
+        let full = w.multipliedReportingOverflow(by: h).partialValue
+        return (full, Int(Double(w) * scale * Double(h) * scale))
     }
 
     /// A small upright preview for UI rows. Decodes WebP too.

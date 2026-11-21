@@ -5,13 +5,24 @@ import Foundation
 /// submission in flight, so two sources that map to the same name never race for it.
 public actor ConversionQueue {
     public let maxConcurrent: Int
-    private var active = 0
-    private var waiters: [CheckedContinuation<Void, Never>] = []
+    public let budgetBytes: Int64
+    private var admission: Admission<UUID>
+    private var waiters: [UUID: CheckedContinuation<Void, Never>] = [:]
     private var reserved: Set<URL> = []
 
-    public init(maxConcurrent: Int = 2) { self.maxConcurrent = max(1, maxConcurrent) }
+    /// - Parameters:
+    ///   - maxConcurrent: most jobs at once, however small.
+    ///   - budgetBytes: estimated peak memory of the jobs running together; a job larger than this runs alone.
+    public init(maxConcurrent: Int = 2, budgetBytes: Int64 = Admission<UUID>.defaultBudget) {
+        self.maxConcurrent = max(1, maxConcurrent)
+        self.budgetBytes = budgetBytes
+        admission = Admission(budgetBytes: budgetBytes, maxConcurrent: maxConcurrent)
+    }
 
-    /// A sensible default for this machine.
+    /// Jobs decoding, encoding or writing right now.
+    public var runningCount: Int { admission.running.count }
+
+    /// A sensible default for this machine. Memory is limited separately by `budgetBytes`.
     public static var defaultConcurrency: Int { min(4, max(2, ProcessInfo.processInfo.activeProcessorCount / 3)) }
 
     /// Starts converting and returns the events. The stream ends after the last job; cancelling its consumer
@@ -43,11 +54,12 @@ public actor ConversionQueue {
     }
 
     private func process(_ job: ConversionJob, plan: Plan, options: EncodeOptions, events: AsyncStream<ConversionEvent>.Continuation) async {
-        await acquire()
-        defer { release() }
         var destination = plan.destination
         defer { reserved.remove(destination) }
-        if Task.isCancelled { events.yield(.failed(job, .writeFailed("Cancelled"))); return }
+        let cost = await Self.estimateCost(job.source, options: options)
+        await acquire(job.id, cost: cost)
+        defer { release(job.id) }
+        if Task.isCancelled { events.yield(.failed(job, .cancelled)); return }
         events.yield(.started(job))
 
         let encoded: Encoded
@@ -56,6 +68,7 @@ public actor ConversionQueue {
             events.yield(.failed(job, error)); return
         }
 
+        if Task.isCancelled { events.yield(.failed(job, .cancelled)); return }
         var notes = encoded.notes
         if plan.usesFallback, case .file = job.source { notes.append(Self.fallbackNote(job.fallbackDirectory)) }
         var usingFallback = plan.usesFallback
@@ -81,6 +94,8 @@ public actor ConversionQueue {
                 usingFallback = true
                 notes.append(Self.fallbackNote(job.fallbackDirectory))
                 _ = reason
+            case .cancelled:
+                events.yield(.failed(job, .cancelled)); return
             case .exists:
                 events.yield(.failed(job, .writeFailed("No free file name"))); return
             case .failed(let reason):
@@ -115,15 +130,21 @@ public actor ConversionQueue {
         "Saved to \(folder.lastPathComponent): the source folder is not writable"
     }
 
-    // MARK: - Concurrency limit
+    // MARK: - Admission
 
-    private func acquire() async {
-        if active < maxConcurrent { active += 1; return }
-        await withCheckedContinuation { waiters.append($0) }  // the releasing job hands its slot over
+    private func acquire(_ id: UUID, cost: Int64) async {
+        if admission.request(id, cost: cost) { return }
+        await withCheckedContinuation { waiters[id] = $0 }  // resumed by `release` once admitted
     }
 
-    private func release() {
-        if waiters.isEmpty { active -= 1 } else { waiters.removeFirst().resume() }
+    private func release(_ id: UUID) {
+        for next in admission.finish(id) { waiters.removeValue(forKey: next)?.resume() }
+    }
+
+    @concurrent
+    static func estimateCost(_ source: ImageSource, options: EncodeOptions) async -> Int64 {
+        guard let px = ImageDecoder.estimatePixels(source, maxPixelEdge: options.maxPixelEdge) else { return 0 }
+        return Admission<UUID>.cost(sourcePixels: px.source, outputPixels: px.output, lossless: options.lossless)
     }
 
     // MARK: - Off-actor work
@@ -136,36 +157,63 @@ public actor ConversionQueue {
         let notes: [String]
     }
 
+    /// Runs `convert` off the actor; cancelling the task stops libwebp mid-encode.
     @concurrent
     static func encode(_ source: ImageSource, options: EncodeOptions, progress: (@Sendable (Double) -> Void)?) async throws(ConversionError) -> Encoded {
-        try convert(source, options: options, progress: progress)
+        let flag = CancellationFlag()
+        let result = await withTaskCancellationHandler {
+            Result { () throws(ConversionError) in try convert(source, options: options, progress: progress, cancellation: flag) }
+        } onCancel: {
+            flag.cancel()
+        }
+        return try result.get()
     }
 
     /// The whole decode → encode pipeline for one source, synchronously.
-    static func convert(_ source: ImageSource, options: EncodeOptions, progress: (@Sendable (Double) -> Void)? = nil) throws(ConversionError) -> Encoded {
+    static func convert(
+        _ source: ImageSource, options: EncodeOptions, progress: (@Sendable (Double) -> Void)? = nil,
+        cancellation: CancellationFlag? = nil
+    ) throws(ConversionError) -> Encoded {
         let inputBytes: Int64
         switch source {
         case .file(let url):
+            if let problem = FileAvailability.problem(at: url) { throw problem }
             let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize
             guard let size else { throw .decodeFailed }
             inputBytes = Int64(size)
         case .data(let data, _):
             inputBytes = Int64(data.count)
         }
+        if cancellation?.isCancelled == true { throw .cancelled }
         let keep = !options.stripMetadata
-        let decoded = try ImageDecoder.load(source, maxPixelEdge: options.maxPixelEdge, includeMetadata: keep)
+        // The decoded image lives only inside `rasterise`, so it is freed before libwebp copies the pixels.
+        let prepared = try rasterise(source, options: options, includeMetadata: keep)
         progress?(0.1)
         var scaled: (@Sendable (Double) -> Void)?
         if let progress { scaled = { progress(0.1 + 0.9 * $0) } }
         let data = try WebPEncoder.encode(
-            decoded.image, options: options, iccProfile: keep ? WebPEncoder.sRGBProfile : nil, exif: keep ? decoded.exif : nil,
-            progress: scaled
+            raster: prepared.raster, options: options, iccProfile: keep ? WebPEncoder.sRGBProfile : nil,
+            exif: keep ? prepared.exif : nil, progress: scaled, cancellation: cancellation
         )
         progress?(1)  // libwebp's last report can stop short of 100
-        return Encoded(data: data, inputBytes: inputBytes, pixelSize: decoded.pixelSize, originalPixelSize: decoded.originalPixelSize, notes: decoded.notes)
+        return Encoded(data: data, inputBytes: inputBytes, pixelSize: prepared.pixelSize, originalPixelSize: prepared.originalPixelSize, notes: prepared.notes)
     }
 
-    enum WriteOutcome: Sendable { case written, exists, failed(String) }
+    struct Prepared {
+        let raster: Raster
+        let exif: Data?
+        let pixelSize: PixelSize
+        let originalPixelSize: PixelSize
+        let notes: [String]
+    }
+
+    static func rasterise(_ source: ImageSource, options: EncodeOptions, includeMetadata: Bool) throws(ConversionError) -> Prepared {
+        let decoded = try ImageDecoder.load(source, maxPixelEdge: options.maxPixelEdge, includeMetadata: includeMetadata)
+        let raster = try Raster.make(decoded.image)
+        return Prepared(raster: raster, exif: decoded.exif, pixelSize: decoded.pixelSize, originalPixelSize: decoded.originalPixelSize, notes: decoded.notes)
+    }
+
+    enum WriteOutcome: Sendable { case written, exists, cancelled, failed(String) }
 
     /// Writes to a hidden temporary file beside `destination`, then renames it into place without ever replacing
     /// an existing file (`RENAME_EXCL`).
@@ -173,9 +221,14 @@ public actor ConversionQueue {
     static func write(_ data: Data, to destination: URL) async -> WriteOutcome {
         let directory = destination.deletingLastPathComponent()
         let temp = directory.appending(path: ".\(destination.lastPathComponent).\(UUID().uuidString).tmp", directoryHint: .notDirectory)
+        if Task.isCancelled { return .cancelled }
         do { try data.write(to: temp) } catch {
             try? FileManager.default.removeItem(at: temp)
             return .failed((error as NSError).localizedDescription)
+        }
+        if Task.isCancelled {
+            try? FileManager.default.removeItem(at: temp)
+            return .cancelled
         }
         let rc = temp.withUnsafeFileSystemRepresentation { from in
             destination.withUnsafeFileSystemRepresentation { to in

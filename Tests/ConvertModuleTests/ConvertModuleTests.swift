@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import ImageEngine
 import NotchCore
@@ -14,10 +15,14 @@ final class ScriptedRunner: ConversionRunning {
         let events: AsyncStream<ConversionEvent>.Continuation
     }
     private let state = Mutex<[Submission]>([])
+    private let terminated = Mutex(0)
     var submissions: [Submission] { state.withLock { $0 } }
+    /// Streams whose consumer went away (cancelled) or that finished.
+    var terminations: Int { terminated.withLock { $0 } }
 
     func submit(_ jobs: [ConversionJob], options: EncodeOptions) -> AsyncStream<ConversionEvent> {
         let (stream, continuation) = AsyncStream.makeStream(of: ConversionEvent.self)
+        continuation.onTermination = { [self] _ in self.terminated.withLock { $0 += 1 } }
         state.withLock { $0.append(Submission(jobs: jobs, options: options, events: continuation)) }
         return stream
     }
@@ -256,8 +261,9 @@ extension ImageSource {
         let row = try #require(m.rows.first)
         #expect(row.figure == "+6%")
         #expect(row.figureTint == .secondary)
-        #expect(m.liveActivity?.leading == .symbol("checkmark.circle.fill", tint: .secondary))
-        #expect(m.liveActivity?.trailing == .text("+6%"))
+        // Finished work, so a success checkmark; the growth itself is information.
+        #expect(m.liveActivity?.leading == .symbol("checkmark.circle.fill", tint: .success))
+        #expect(m.liveActivity?.trailing == .text("+6%", tint: .secondary))
         #expect(r.haptics.count == 1)
     }
 
@@ -309,7 +315,7 @@ extension ImageSource {
         await eventually("done") { m.batch?.isRunning == false }
         a = try #require(m.liveActivity)
         #expect(a.leading == .symbol("checkmark.circle.fill", tint: .success))
-        #expect(a.trailing == .text("\u{2212}78%"))   // 880 of 4000 bytes
+        #expect(a.trailing == .text("\u{2212}78%", tint: .success))   // 880 of 4000 bytes
         #expect(a.expiresAt == r.clock.now.addingTimeInterval(4))
         #expect(a.id == "convert.batch")
         #expect(r.haptics.count == 1)
@@ -335,7 +341,7 @@ extension ImageSource {
         sub.events.yield(.succeeded(sub.jobs[1], result(sub.jobs[1], input: 1000, output: 500)))
         await eventually { m.batch?.isRunning == false }
         #expect(m.liveActivity?.leading == .symbol("exclamationmark.triangle.fill", tint: .warning))
-        #expect(m.liveActivity?.trailing == .text("\u{2212}50%"))
+        #expect(m.liveActivity?.trailing == .text("\u{2212}50%", tint: .success))
 
         m.convert([.file(URL(fileURLWithPath: "/tmp/z.webp"))])
         #expect(m.batch?.total == 1)  // a finished batch is replaced, not extended
@@ -343,7 +349,7 @@ extension ImageSource {
         sub.events.yield(.failed(sub.jobs[0], .alreadyWebP))
         await eventually { m.batch?.isRunning == false }
         #expect(m.liveActivity?.leading == .symbol("exclamationmark.triangle.fill", tint: .warning))
-        #expect(m.liveActivity?.trailing == .text("Failed"))
+        #expect(m.liveActivity?.trailing == .text("Failed", tint: .warning))
         #expect(r.haptics.count == 1)  // not for the all-failed batch
     }
 
@@ -362,7 +368,64 @@ extension ImageSource {
         #expect(m.liveActivity?.expiresAt == nil)
         for job in second.jobs { second.events.yield(.succeeded(job, result(job, input: 10, output: 5))) }
         await eventually { m.batch?.isRunning == false }
-        #expect(m.liveActivity?.trailing == .text("\u{2212}50%"))
+        #expect(m.liveActivity?.trailing == .text("\u{2212}50%", tint: .success))
+    }
+
+    @Test func stopCancelsWorkAndStartWorksAgain() async throws {
+        let r = try await rig(); defer { r.env.cleanUp() }
+        let m = r.module
+        m.convert([.file(URL(fileURLWithPath: "/tmp/a.png")), .file(URL(fileURLWithPath: "/tmp/b.png"))])
+        let first = try #require(r.runner.submissions.first)
+        first.events.yield(.succeeded(first.jobs[0], result(first.jobs[0], input: 10, output: 5)))
+        first.events.yield(.started(first.jobs[1]))
+        await eventually { m.heroRowID == first.jobs[1].id }
+
+        m.stop()
+        await eventually("engine stream cancelled") { r.runner.terminations == 1 }
+        #expect(m.liveActivity == nil && m.batch == nil)
+        #expect(m.rows.map(\.name) == ["a.png"])  // finished rows stay, unfinished ones go
+        #expect(m.inFlightSubmissions == 0)
+        // Late events from the cancelled stream change nothing.
+        first.events.yield(.succeeded(first.jobs[1], result(first.jobs[1], input: 10, output: 5)))
+        try await Task.sleep(for: .milliseconds(30))
+        #expect(m.rows.count == 1 && r.env.shelf.added.count == 1)
+        m.stop()  // idempotent
+
+        await m.start(r.env.context(for: .convert))
+        m.convert([.file(URL(fileURLWithPath: "/tmp/c.png"))])
+        let second = try #require(r.runner.submissions.last)
+        #expect(second.jobs.first?.fallbackDirectory == r.env.directories.downloads)
+        second.events.yield(.succeeded(second.jobs[0], result(second.jobs[0], input: 10, output: 5)))
+        await eventually { m.batch?.isRunning == false }
+        #expect(m.rows.map(\.name) == ["c.png", "a.png"])
+        #expect(m.liveActivity?.trailing == .text("\u{2212}50%", tint: .success))
+        #expect(r.env.shelf.added.count == 2)
+    }
+
+    @Test func stopCancelsARealEncode() async throws {
+        let env = try TestEnvironment(); defer { env.cleanUp() }
+        let queue = ConversionQueue(maxConcurrent: 1)
+        let module = ConvertModule(runner: queue, reveal: { _ in }, haptic: {})
+        await module.start(env.context(for: .convert))
+        let folder = env.root.appending(path: "Pictures", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        // Noise is slow to encode at quality 100, method 6.
+        var bytes = [UInt8](repeating: 0, count: 2400 * 2400 * 4)
+        var seed: UInt64 = 42
+        for i in bytes.indices { seed = seed &* 6364136223846793005 &+ 1; bytes[i] = UInt8(truncatingIfNeeded: seed >> 56) }
+        let image = CGImage(width: 2400, height: 2400, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: 9600,
+                            space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue),
+                            provider: CGDataProvider(data: Data(bytes) as CFData)!, decode: nil, shouldInterpolate: false, intent: .defaultIntent)!
+        let src = try TestImage.write(image, to: folder.appending(path: "noise.png"))
+        module.setQuality(100)
+        module.convert([.file(src)])
+        await eventually("encoding") { if case .converting(let p?) = module.rows.first?.state { p > 0.2 } else { false } }
+        module.stop()
+        let clock = ContinuousClock(), stoppedAt = clock.now
+        while await queue.runningCount > 0, clock.now - stoppedAt < .seconds(5) { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(await queue.runningCount == 0)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: folder.path) == ["noise.png"])
+        #expect(env.shelf.added.isEmpty)
     }
 
     @Test func realConversionEndToEnd() async throws {

@@ -202,7 +202,7 @@ import UniformTypeIdentifiers
         // A real PNG cut off after its header.
         let png = Img.encode([Img.pattern(width: 64, height: 64, noise: true).0], type: .png)
         try png.prefix(40).write(to: fx.url("truncated.png"))
-        #expect(throws: ConversionError.decodeFailed) { try ImageDecoder.load(.file(fx.url("truncated.png")), maxPixelEdge: nil) }
+        #expect(throws: ConversionError.incomplete) { try ImageDecoder.load(.file(fx.url("truncated.png")), maxPixelEdge: nil) }
         try Data("hello".utf8).write(to: fx.url("notes.txt"))
         #expect(throws: ConversionError.unsupported) { try ImageDecoder.load(.file(fx.url("notes.txt")), maxPixelEdge: nil) }
         #expect(throws: ConversionError.decodeFailed) { try ImageDecoder.load(.file(fx.url("missing.png")), maxPixelEdge: nil) }

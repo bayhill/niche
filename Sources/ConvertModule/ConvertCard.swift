@@ -1,4 +1,3 @@
-import CoreGraphics
 import ImageEngine
 import NotchCore
 import SwiftUI
@@ -83,37 +82,26 @@ private struct RowList: View {
     }
 }
 
-/// One file in any state. Always a `ResultRow` so state changes morph in place; while converting, a ring covers
-/// the leading slot. Finished rows reveal the file on click and drag out as files.
+/// One file in any state: waiting, converting (a ring in the leading slot), done, failed.
+/// Finished rows reveal the file on click and drag out as files.
 private struct FileRow: View {
     let row: ConvertRow
     let isHero: Bool
     let action: () -> Void
 
-    /// Lets the ring draw the leading slot itself (`ResultRow` has no slot for a custom view).
-    private static let clearThumbnail: SendableImage? = {
-        guard let ctx = CGContext(data: nil, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 0,
-                                  space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
-              let image = ctx.makeImage()
-        else { return nil }
-        return SendableImage(image)
-    }()
-
     var body: some View {
-        let converting: Double?? = if case .converting(let p) = row.state { .some(p) } else { .none }
-        let failed = if case .failed = row.state { true } else { false }
         Button(action: action) {
-            ResultRow(
-                thumbnail: converting != nil ? Self.clearThumbnail : row.thumbnail,
-                symbol: failed ? "exclamationmark.triangle" : "photo",
-                symbolTint: failed ? .warning : .secondary,
-                title: row.name, detail: row.detail,
-                trailing: row.figure, trailingTint: row.figureTint
-            )
-            .overlay(alignment: .leading) {
-                if let progress = converting {
-                    ring(progress).transition(.opacity)
-                }
+            if case .converting(let progress) = row.state {
+                ResultRow(title: row.name, detail: row.detail) { ring(progress) }
+                    .transition(.opacity)
+            } else {
+                let failed = if case .failed = row.state { true } else { false }
+                ResultRow(
+                    thumbnail: row.thumbnail, symbol: failed ? "exclamationmark.triangle" : "photo",
+                    symbolTint: failed ? .warning : .secondary, title: row.name, detail: row.detail,
+                    trailing: row.figure, trailingTint: row.figureTint
+                )
+                .transition(.opacity)
             }
         }
         .buttonStyle(RowButtonStyle())
@@ -126,17 +114,14 @@ private struct FileRow: View {
     }
 
     @ViewBuilder private func ring(_ progress: Double?) -> some View {
-        let slot = ZStack {
-            Tokens.Colors.cardFill
+        let ring = Group {
             if let progress {
                 ProgressRing(progress: progress, size: 16, lineWidth: 2)
             } else {
                 SpinnerRing(size: 16, lineWidth: 2)
             }
         }
-        .frame(width: 26, height: 26)
-        .clipShape(RoundedRectangle(cornerRadius: Tokens.Radius.thumbnail, style: .continuous))
-        if isHero { slot.notchHero(.convert) } else { slot }
+        if isHero { ring.notchHero(.convert) } else { ring }
     }
 
     private var help: String {

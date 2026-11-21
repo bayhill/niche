@@ -218,18 +218,21 @@ public final class ConvertModule: NotchModule, ImageConverting {
         context.log.notice("started")
     }
 
+    /// Cancels work in flight (the engine stops mid-encode and writes nothing), drops unfinished rows and the
+    /// activity. Finished rows stay. `start` may be called again afterwards.
     public func stop() {
         tasks.values.forEach { $0.cancel() }
         tasks.removeAll()
         expiryTask?.cancel()
         expiryTask = nil
-        if batch?.isRunning == true {
-            rows.removeAll(where: \.isActive)
-            batch = nil
-            liveActivity = nil
-        }
+        rows.removeAll(where: \.isActive)
+        batch = nil
+        liveActivity = nil
         context = nil
     }
+
+    /// Conversions whose events are still being received.
+    public var inFlightSubmissions: Int { tasks.count }
 
     public func panelView() -> AnyView { AnyView(ConvertCard(module: self)) }
 
@@ -282,9 +285,10 @@ public final class ConvertModule: NotchModule, ImageConverting {
         let token = UUID()
         tasks[token] = Task { [weak self] in
             for await event in stream {
-                guard let self else { return }
+                guard !Task.isCancelled, let self else { return }
                 self.handle(event)
             }
+            guard !Task.isCancelled else { return }  // `stop` already forgot this task
             self?.tasks[token] = nil
         }
     }
@@ -396,15 +400,17 @@ public final class ConvertModule: NotchModule, ImageConverting {
         let trailing: ActivityGlyph
         var label: String
         if let saved = batch.savedFraction {
-            // A saving is success; growth is information (secondary); failures need a look (warning).
-            let tint: TintRole = batch.failed > 0 ? .warning : (saved >= 0.005 ? .success : .secondary)
-            leading = .symbol(batch.failed > 0 ? "exclamationmark.triangle.fill" : "checkmark.circle.fill", tint: tint)
-            trailing = .text(Format.saving(saved))
+            // Finished work is success, failures need a look (warning); the figure is success for a saving and
+            // secondary for growth, which is information.
+            leading = batch.failed > 0
+                ? .symbol("exclamationmark.triangle.fill", tint: .warning)
+                : .symbol("checkmark.circle.fill", tint: .success)
+            trailing = .text(Format.saving(saved), tint: saved >= 0.005 ? .success : .secondary)
             label = "Converted \(batch.succeeded) of \(batch.total) images to WebP, size \(Format.saving(saved))"
             if batch.failed > 0 { label += ", \(batch.failed) failed" }
         } else {
             leading = .symbol("exclamationmark.triangle.fill", tint: .warning)
-            trailing = .text("Failed")
+            trailing = .text("Failed", tint: .warning)
             label = batch.total == 1 ? "Conversion failed" : "All \(batch.total) conversions failed"
         }
         liveActivity = LiveActivity(
