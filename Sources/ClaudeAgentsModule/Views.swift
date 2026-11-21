@@ -116,6 +116,14 @@ struct ClaudeSettingsView: View {
                     Label(statusText, systemImage: statusSymbol).symbolRenderingMode(.multicolor)
                 }
             }
+            Section("Beside the notch") {
+                Toggle("Show the session name beside the notch", isOn: Binding(
+                    get: { module.showsNamesInNotch }, set: { module.setShowsNamesInNotch($0) }
+                ))
+                .disabled(!module.canChangeAlerts)
+                Text("Names the waiting session and what it wants, such as \u{201C}Allow Bash\u{201D}. Project names are then visible on screen, including while screen sharing.")
+                    .foregroundStyle(.secondary)
+            }
             if let plan = module.plan {
                 Section(module.alertsState == .on ? "Installed with" : "What install does") {
                     ForEach(Array(plan.installSteps.enumerated()), id: \.offset) { i, step in

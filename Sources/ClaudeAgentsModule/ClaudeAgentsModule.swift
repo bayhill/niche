@@ -34,6 +34,18 @@ public final class ClaudeAgentsModule: NotchModule {
     /// bridge writes to exists only while this is true and the module is running.
     public static let alertsEnabled = SettingsKey<Bool>("claudeAgents.alertsEnabled", default: false)
 
+    /// Whether the closed notch names the waiting session and what it wants. Off restores glyph-only wings, for
+    /// people who share their screen and do not want project names visible.
+    public static let showNamesInNotch = SettingsKey<Bool>("claudeAgents.showNamesInNotch", default: true)
+
+    public var showsNamesInNotch: Bool { settings?.get(Self.showNamesInNotch) ?? Self.showNamesInNotch.defaultValue }
+
+    public func setShowsNamesInNotch(_ on: Bool) {
+        settings?.set(Self.showNamesInNotch, on)
+        let activity = ClaudeActivity.make(for: sessions, now: clock(), showNames: showsNamesInNotch)
+        if activity != liveActivity { liveActivity = activity }
+    }
+
     /// The honest state of alerts: the user's choice combined with what Claude Code actually has registered.
     public var alertsState: AlertsState {
         AlertsState(enabled: settings?.get(Self.alertsEnabled) ?? sampleAlertsOn, hookStatus: hookStatus)
@@ -207,7 +219,7 @@ public final class ClaudeAgentsModule: NotchModule {
     private func publish(now: Date) {
         let next = reducer.sessions(now: now)
         if next != sessions { Motion.animate(Motion.morph) { sessions = next } }
-        let activity = ClaudeActivity.make(for: next, now: now)
+        let activity = ClaudeActivity.make(for: next, now: now, showNames: showsNamesInNotch)
         if activity != liveActivity { liveActivity = activity }
     }
 

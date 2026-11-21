@@ -35,7 +35,7 @@ final class RecordingActivator: SessionActivating {
         #expect(states.contains { if case .idle = $0 { true } else { false } })
         #expect(m.sessions.prefix(2).allSatisfy { $0.state.needsUser })
         #expect(m.liveActivity?.priority == .attention)
-        #expect(m.liveActivity?.trailing == .text("2"))
+        #expect(m.liveActivity?.trailingText == "2 sessions" && m.liveActivity?.leadingText == m.sessions.first?.title)
         let card = SessionCardContent.make(sessions: m.sessions, alerts: m.alertsState)
         #expect(card.rows.count == 2 && card.hiddenCount == 3 && card.showsEnableAlerts)
     }
@@ -160,6 +160,25 @@ final class RecordingActivator: SessionActivating {
         #expect(!module.canChangeAlerts)
         await module.installHooks()
         #expect(await runner.calls.isEmpty, "not started: nothing to record the choice in, so nothing runs")
+    }
+
+    @Test func namesSettingSwitchesTheWingText() async throws {
+        let env = try TestEnvironment()
+        defer { env.cleanUp() }
+        let (module, _, paths) = try installerModule(env)
+        env.settings.set(ClaudeAgentsModule.alertsEnabled, true)
+        await module.start(env.context(for: .claudeAgents))
+        #expect(module.showsNamesInNotch, "on by default")
+        try Fixture.hook("PermissionRequest", extra: #","tool_name":"Bash""#).write(to: paths.spool.appending(path: "1-1-1.json"))
+        await module.refresh()
+        #expect(module.liveActivity?.trailingText == "Allow Bash" && module.liveActivity?.leadingText == "demo")
+        module.setShowsNamesInNotch(false)
+        #expect(!env.settings.get(ClaudeAgentsModule.showNamesInNotch))
+        #expect(module.liveActivity?.leadingText == nil && module.liveActivity?.trailingText == nil)
+        #expect(module.liveActivity?.trailing == .text("demo"))
+        module.setShowsNamesInNotch(true)
+        #expect(module.liveActivity?.trailingText == "Allow Bash")
+        module.stop()
     }
 
     @Test func alertsStateTable() {

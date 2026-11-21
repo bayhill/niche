@@ -231,23 +231,117 @@ import Testing
     }
 
     @Test func attentionWhenAnyoneWaits() throws {
-        let one = try #require(ClaudeActivity.make(for: [session("a", "notcher", .needsPermission(detail: "Bash"), since: -20), session("b", "x", .working, since: -5)], now: now))
+        let one = try #require(ClaudeActivity.make(for: [session("a", "notcher", .needsPermission(detail: "Bash"), since: -20), session("b", "x", .working, since: -5)], now: now, showNames: false))
         #expect(one.priority == .attention)
         #expect(one.leading == .symbol("hand.raised.fill", tint: .warning, pulse: true))
         #expect(one.trailing == .text("notch\u{2026}"))
         #expect(one.accessibilityLabel == "notcher: Needs permission")
         #expect(one.module == .claudeAgents)
 
-        let two = try #require(ClaudeActivity.make(for: [session("a", "lanternfly", .needsPermission(detail: nil), since: -20), session("b", "y", .needsInput(detail: nil), since: -5)], now: now))
+        let two = try #require(ClaudeActivity.make(for: [session("a", "lanternfly", .needsPermission(detail: nil), since: -20), session("b", "y", .needsInput(detail: nil), since: -5)], now: now, showNames: false))
         #expect(two.trailing == .text("2"))
         #expect(two.accessibilityLabel == "2 Claude sessions need attention")
         #expect(two.leading == .symbol("questionmark.bubble.fill", tint: .warning, pulse: true))
-        #expect(ClaudeActivity.make(for: [session("a", "lanternfly", .needsInput(detail: nil), since: -1)], now: now)?.trailing == .text("lante\u{2026}"))
+        #expect(ClaudeActivity.make(for: [session("a", "lanternfly", .needsInput(detail: nil), since: -1)], now: now, showNames: false)?.trailing == .text("lante\u{2026}"))
+    }
+
+    @Test func namesOffIsExactlyThePreviousActivity() throws {
+        let waiting = [session("a", "notcher", .needsPermission(detail: "Bash"), since: -20)]
+        let off = try #require(ClaudeActivity.make(for: waiting, now: now, showNames: false))
+        #expect(off == LiveActivity(
+            id: "claudeAgents.attention", module: .claudeAgents, priority: .attention,
+            leading: .symbol("hand.raised.fill", tint: .warning, pulse: true), trailing: .text("notch\u{2026}"),
+            updatedAt: now.addingTimeInterval(-20), accessibilityLabel: "notcher: Needs permission"
+        ))
+        let done = [session("a", "demo", .finished(at: now.addingTimeInterval(-2)), since: -2)]
+        #expect(try #require(ClaudeActivity.make(for: done, now: now, showNames: false)) == LiveActivity(
+            id: "claudeAgents.done", module: .claudeAgents, priority: .passive,
+            leading: .symbol("checkmark.circle.fill", tint: .success), trailing: .text("demo"),
+            expiresAt: now.addingTimeInterval(-2 + ClaudeActivity.doneDuration), updatedAt: now.addingTimeInterval(-2),
+            accessibilityLabel: "demo: done"
+        ))
+    }
+
+    @Test func oneWaitingWithTool() throws {
+        let a = try #require(ClaudeActivity.make(for: [session("a", "notcher", .needsPermission(detail: "Bash"), since: -20), session("b", "x", .working, since: -5)], now: now))
+        #expect(a.leadingText == "notcher" && a.trailingText == "Allow Bash")
+        #expect(a.leading == .symbol("hand.raised.fill", tint: .warning, pulse: true) && a.trailing == nil)
+        #expect(a.accessibilityLabel == "notcher is waiting: Allow Bash")
+        #expect(a.id == "claudeAgents.attention" && a.priority == .attention && a.updatedAt == now.addingTimeInterval(-20))
+    }
+
+    @Test func oneWaitingWithoutToolOrForInput() throws {
+        let perm = try #require(ClaudeActivity.make(for: [session("a", "notcher", .needsPermission(detail: nil), since: -1)], now: now))
+        #expect(perm.trailingText == "Needs permission" && perm.accessibilityLabel == "notcher is waiting: Needs permission")
+        let input = try #require(ClaudeActivity.make(for: [session("a", "webshop", .needsInput(detail: "Pick a database"), since: -1)], now: now))
+        #expect(input.leadingText == "webshop" && input.trailingText == "Needs input")
+        #expect(input.leading == .symbol("questionmark.bubble.fill", tint: .warning, pulse: true))
+    }
+
+    @Test func severalWaitingNameTheLongestWaiting() throws {
+        let sessions = [
+            session("a", "newest", .needsPermission(detail: "Edit"), since: -5),
+            session("b", "oldest", .needsPermission(detail: "Bash"), since: -300),
+            session("c", "middle", .needsInput(detail: nil), since: -60),
+            session("d", "busy", .working, since: -1),
+        ]
+        let a = try #require(ClaudeActivity.make(for: sessions, now: now))
+        #expect(a.leadingText == "oldest" && a.trailingText == "3 sessions")
+        #expect(a.trailing == nil, "the count is not repeated as a glyph")
+        #expect(SessionCardContent.make(sessions: sessions, alerts: .on).rows.first?.title == "oldest", "the card lists the same session first")
+        #expect(a.accessibilityLabel == "3 Claude sessions are waiting; oldest has waited longest: Allow Bash")
+        #expect(a.id == "claudeAgents.attention")
+    }
+
+    @Test func doneNamesTheSession() throws {
+        let a = try #require(ClaudeActivity.make(for: [session("a", "garden-clock", .finished(at: now.addingTimeInterval(-2)), since: -2)], now: now))
+        #expect(a.leadingText == "garden-clock" && a.trailingText == "Done" && a.trailing == nil)
+        #expect(a.priority == .passive && a.id == "claudeAgents.done" && a.accessibilityLabel == "garden-clock is done")
+    }
+
+    @Test func textHygiene() throws {
+        let messy = session("a", "  fix\n the   cart\t ", .needsPermission(detail: "  mcp__server__\n" + String(repeating: "x", count: 500)), since: -1)
+        let a = try #require(ClaudeActivity.make(for: [messy], now: now))
+        #expect(a.leadingText == "fix the cart")
+        let tool = try #require(a.trailingText)
+        #expect(!tool.contains("\n") && tool.hasPrefix("Allow mcp__server__ x"))
+        #expect(tool.count == "Allow ".count + ClaudeActivity.maxToolLength && tool.hasSuffix("\u{2026}"))
+        #expect(ClaudeActivity.request(for: .needsPermission(detail: " \n ")) == "Needs permission")
+        let long = try #require(ClaudeActivity.make(for: [session("b", String(repeating: "t", count: 300), .needsInput(detail: nil), since: -1)], now: now))
+        #expect(long.leadingText?.count == ClaudeActivity.maxTitleLength)
+        for text in [a.leadingText, a.trailingText, a.accessibilityLabel, long.trailingText].compactMap({ $0 }) {
+            #expect(!text.contains("!") && !text.lowercased().contains("you"))
+        }
+    }
+
+    @Test func registryOnlyNeverYieldsAToolName() throws {
+        var r = SessionReducer()
+        r.applyRegistry(RegistrySnapshot(records: [Fixture.record(status: "waiting", at: 0, waitingFor: "permission prompt")], available: true))
+        let s = r.sessions(now: Fixture.t0.addingTimeInterval(1))
+        #expect(s.first?.state == .needsPermission(detail: nil))
+        let a = try #require(ClaudeActivity.make(for: s, now: Fixture.t0.addingTimeInterval(1)))
+        #expect(a.trailingText == "Needs permission")
+        var input = SessionReducer()
+        input.applyRegistry(RegistrySnapshot(records: [Fixture.record(status: "waiting", at: 0, waitingFor: "dialog open")], available: true))
+        #expect(ClaudeActivity.make(for: input.sessions(now: Fixture.t0.addingTimeInterval(1)), now: Fixture.t0)?.trailingText == "Needs input")
+    }
+
+    @Test func toolNameIsCarriedFromTheHookAndUpdatedForANewPrompt() throws {
+        var r = SessionReducer()
+        r.applyRegistry(RegistrySnapshot(records: [Fixture.record(status: "busy", at: 0)], available: true))
+        r.apply(Fixture.event(.permissionRequest(tool: "Bash"), at: 10))
+        r.apply(Fixture.event(.notification(type: "permission_prompt", message: "Claude needs permission"), at: 10.5))
+        r.applyRegistry(RegistrySnapshot(records: [Fixture.record(status: "waiting", at: 11, waitingFor: "permission prompt")], available: true))
+        let first = try #require(r.sessions(now: Fixture.t0.addingTimeInterval(12)).first)
+        #expect(ClaudeActivity.request(for: first.state) == "Allow Bash", "hook tool survives the registry's own waiting status")
+        r.apply(Fixture.event(.permissionRequest(tool: "Edit"), at: 20))
+        let second = try #require(r.sessions(now: Fixture.t0.addingTimeInterval(21)).first)
+        #expect(ClaudeActivity.request(for: second.state) == "Allow Edit", "a new prompt for another tool is not shown as the old one")
     }
 
     @Test func shortDoneThenNothing() throws {
         let done = [session("a", "demo", .finished(at: now.addingTimeInterval(-2)), since: -2), session("b", "x", .idle(since: now), since: 0)]
-        let activity = try #require(ClaudeActivity.make(for: done, now: now))
+        let activity = try #require(ClaudeActivity.make(for: done, now: now, showNames: false))
         #expect(activity.priority == .passive)
         #expect(activity.accessibilityLabel == "demo: done" && activity.trailing == .text("demo"))
         #expect(activity.expiresAt == now.addingTimeInterval(-2 + ClaudeActivity.doneDuration))
@@ -288,7 +382,7 @@ import Testing
             session("perm", .needsPermission(detail: "Bash"), since: -20),
         ]
         let c = SessionCardContent.make(sessions: all, alerts: .on)
-        #expect(c.rows.map(\.id) == ["perm", "ask"], "needs the user first, newest change first")
+        #expect(c.rows.map(\.id) == ["ask", "perm"], "needs the user first, longest waiting first")
         #expect(c.hiddenCount == 3)
         let calm = SessionCardContent.make(sessions: Array(all.prefix(3)), alerts: .on)
         #expect(calm.rows.map(\.id) == ["work", "done"], "then working, then done/idle")

@@ -218,7 +218,7 @@ public struct SessionReducer: Sendable {
 
     // MARK: Output
 
-    /// Every session to show, ordered: needs the user, then working, then idle/finished; newest change first.
+    /// Every session to show, in `ordered` order.
     public func sessions(now: Date) -> [ClaudeSession] {
         var out: [ClaudeSession] = []
         for id in Set(registry.keys).union(hooks.keys) {
@@ -256,10 +256,12 @@ public struct SessionReducer: Sendable {
         return Self.ordered(out)
     }
 
+    /// Needs the user first, longest waiting first (so the card and the wing name the same session); then working,
+    /// then idle/finished, newest change first.
     public static func ordered(_ sessions: [ClaudeSession]) -> [ClaudeSession] {
         sessions.sorted { a, b in
             if a.state.rank != b.state.rank { return a.state.rank < b.state.rank }
-            if a.since != b.since { return a.since > b.since }
+            if a.since != b.since { return a.state.needsUser ? a.since < b.since : a.since > b.since }
             return a.id < b.id
         }
     }
@@ -301,6 +303,8 @@ public struct SessionReducer: Sendable {
     static func combine(_ older: Observation, _ newer: Observation) -> Observation? {
         switch (older.signal, newer.signal) {
         case (.needsPermission(let a), .needsPermission(let b)):
+            // A request naming a different tool is a new prompt (e.g. after a denial), not the same one again.
+            if let a, let b, a != b { return newer }
             return Observation(signal: .needsPermission(a ?? b), at: min(older.at, newer.at))
         case (.needsInput(let a), .needsInput(let b)):
             return Observation(signal: .needsInput(a ?? b), at: min(older.at, newer.at))
