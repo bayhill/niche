@@ -178,10 +178,11 @@ struct GeometryTests {
 
     @Test func dumpForTheDevMachine() {
         let l = NotchGeometry.layout(metrics: .mbp14MoreSpace, state: .expanded, hasActivity: true)
-        #expect(l.windowFrame == CGRect(x: 510, y: 891, width: 780, height: 278))
+        // Wide enough for both wings at the 320 pt cap while hovering (888 pt) plus overshoot.
+        #expect(l.windowFrame == CGRect(x: 420, y: 891, width: 960, height: 278))
         #expect(l.hitRect == CGRect(x: 546, y: 927, width: 708, height: 242))
         #expect(l.visibleRect == l.hitRect)
-        #expect(l.shapeRect == CGRect(x: 36, y: 0, width: 708, height: 242))
+        #expect(l.shapeRect == CGRect(x: 126, y: 0, width: 708, height: 242))
         #expect(l.centerOffset == 0)
     }
 
@@ -218,77 +219,167 @@ struct GeometryTests {
 struct WingAndHoverTests {
     let m = ScreenMetrics.mbp14MoreSpace
     let notch = CGRect(x: 790, y: 1131, width: 220, height: 38)
+    let glyph = PanelLayout.wingWidth
+    let inset = WingText.innerInset
 
-    @Test func noTextKeepsTheGlyphOnlyWing() {
-        #expect(WingText.width(leadingTextWidth: 0, trailingTextWidth: 0, hasTrailingGlyph: true) == PanelLayout.wingWidth)
-        let a = LiveActivity(id: "a", module: .nowPlaying, priority: .ambient, leading: .equalizer(playing: true),
-                             trailing: .text("3/12"), leadingText: "", trailingText: nil, accessibilityLabel: "x")
-        #expect(WingText.width(for: a) == PanelLayout.wingWidth)
+    func wings(_ leading: CGFloat, _ trailing: CGFloat, glyph: Bool = true, status: CGFloat? = nil, state: NotchState = .activity) -> NotchLayout {
+        NotchGeometry.layout(
+            metrics: m, state: state, hasActivity: true,
+            wings: WingRequest(leadingTextWidth: leading, trailingTextWidth: trailing, hasTrailingGlyph: glyph), statusRoom: status
+        )
     }
 
-    @Test func shortTextWidensToFit() {
-        let measured = WingText.measure("Weightless")
-        #expect(measured > 30 && measured < 90)
-        let w = WingText.width(leadingTextWidth: measured, trailingTextWidth: 0, hasTrailingGlyph: true)
-        #expect(w == PanelLayout.wingWidth + measured + WingText.innerInset)
-        #expect(w < PanelLayout.wingMaxWidth)
-        // Measuring uses the wing style's size: wider text measures wider, empty measures nothing.
-        #expect(WingText.measure("Weightless and more") > measured)
+    // MARK: Independent widths
+
+    @Test func noTextKeepsGlyphOnlyWings() {
+        let l = wings(0, 0)
+        #expect(l.wings == .glyphOnly)
+        let a = LiveActivity(id: "a", module: .nowPlaying, priority: .ambient, leading: .equalizer(playing: true),
+                             trailing: .text("3/12"), leadingText: "", trailingText: nil, accessibilityLabel: "x")
+        #expect(WingText.request(for: a) == .none)
+    }
+
+    @Test func eachWingSizesToItsOwnText() {
+        let shortLong = wings(50, 200)
+        #expect(shortLong.wings.leading == glyph + 50 + inset)
+        #expect(shortLong.wings.trailing == glyph + 200 + inset)
+        let longShort = wings(200, 50)
+        #expect(longShort.wings.leading == glyph + 200 + inset)
+        #expect(longShort.wings.trailing == glyph + 50 + inset)
+        let onlyLeft = wings(80, 0)
+        #expect(onlyLeft.wings.leading == glyph + 80 + inset && onlyLeft.wings.trailing == glyph)
+        #expect(onlyLeft.wings.showsLeadingText && !onlyLeft.wings.showsTrailingText)
+        // Trailing text without a trailing glyph only needs the outer inset.
+        #expect(wings(0, 70, glyph: false).wings.trailing == WingText.outerInset + 70 + inset)
+    }
+
+    @Test func bothLongAreCappedIndependently() {
+        let long = WingText.measure("Weightless (Ambient Transmission, Part 1) – Live at the Royal Albert Hall, Remastered 2024")
+        #expect(long > PanelLayout.wingMaxWidth)
+        let l = wings(long, long)
+        #expect(l.wings.leading == PanelLayout.wingMaxWidth && l.wings.trailing == PanelLayout.wingMaxWidth)
+        #expect(l.wings.showsLeadingText && l.wings.showsTrailingText)
+    }
+
+    @Test func measurementUsesTheWingFont() {
+        let measured = WingText.measure("Inside my head")
+        #expect(measured > 50 && measured < 110)
+        #expect(WingText.measure("Inside my head, again") > measured)
         #expect(WingText.measure("") == 0)
     }
 
-    @Test func longTextIsCappedAtTheMaximum() {
-        let long = WingText.measure("Weightless (Ambient Transmission, Part 1) – Remastered 2024")
-        #expect(long > PanelLayout.wingMaxWidth)
-        #expect(WingText.width(leadingTextWidth: long, trailingTextWidth: 0, hasTrailingGlyph: true) == PanelLayout.wingMaxWidth)
+    @Test func theNotchStaysPutWhateverTheWings() {
+        for (left, right) in [(0.0, 0.0), (50.0, 200.0), (200.0, 50.0), (400.0, 400.0)] {
+            for state in [NotchState.activity, .hover] {
+                let l = wings(left, right, state: state)
+                let e = NotchGeometry.extents(state, notch: notch.size, hasActivity: true, wings: l.wings)
+                // The body's left edge plus the left extent lands exactly on the hardware notch's edge.
+                #expect(l.visibleRect.minX + l.topRadius + e.left == notch.minX)
+                #expect(l.visibleRect.maxX - l.topRadius - e.right == notch.maxX)
+                #expect(l.shapeRect.minX + l.windowFrame.minX == l.visibleRect.minX)
+                #expect(l.hitRect == (state == .activity ? notch : l.hitRect))
+            }
+        }
+        let lopsided = wings(200, 0)
+        #expect(lopsided.notchOffsetInShape == ((glyph + 200 + inset) - glyph) / 2)
+        #expect(wings(0, 0).notchOffsetInShape == 0)
     }
 
-    @Test func bothWingsTakeTheWiderSide() {
-        let w = WingText.width(leadingTextWidth: 20, trailingTextWidth: 70, hasTrailingGlyph: true)
-        #expect(w == WingText.width(leadingTextWidth: 70, trailingTextWidth: 20, hasTrailingGlyph: true))
-        #expect(w == PanelLayout.wingWidth + 70 + WingText.innerInset)
-        // Trailing text without a trailing glyph only needs the outer inset.
-        #expect(WingText.width(leadingTextWidth: 0, trailingTextWidth: 70, hasTrailingGlyph: false)
-            == WingText.outerInset + 70 + WingText.innerInset)
+    @Test func wideWingsNeverTakeClicks() {
+        let l = wings(400, 400)
+        #expect(l.hitRect == notch)
+        #expect(!l.hits(CGPoint(x: notch.minX - 200, y: notch.midY)))
+        #expect(!l.hits(CGPoint(x: notch.maxX + 200, y: notch.midY)))
+        #expect(l.hits(CGPoint(x: notch.midX, y: notch.midY)))
     }
 
-    @Test func widenedActivityShapeIsSymmetricAndOnlyTheNotchTakesClicks() {
-        let wide = NotchGeometry.layout(metrics: m, state: .activity, hasActivity: true, wingWidth: 120)
-        let plain = NotchGeometry.layout(metrics: m, state: .activity, hasActivity: true)
-        #expect(wide.wingWidth == 120)
-        #expect(wide.shapeRect.size == CGSize(width: 220 + 240 + 2 * Tokens.Radius.notchClosedTop, height: 38))
-        #expect(wide.visibleRect.midX == notch.midX)
-        #expect(wide.windowFrame == plain.windowFrame)
-        #expect(wide.shapeRect.minX + wide.windowFrame.minX == wide.visibleRect.minX)
-        #expect(wide.hitRect == notch)
-        #expect(!wide.hits(CGPoint(x: notch.minX - 100, y: notch.midY)))
-        #expect(!wide.hits(CGPoint(x: notch.maxX + 100, y: notch.midY)))
+    // MARK: Status items
+
+    let menuBar = CGRect(x: 0, y: 1130, width: 1800, height: 39)
+
+    @Test func statusItemClearance() {
+        func item(_ x: CGFloat, width: CGFloat = 24, y: CGFloat = 1130) -> CGRect { CGRect(x: x, y: y, width: width, height: 39) }
+        #expect(StatusItemClearance.trailingRoom(notch: notch, menuBar: menuBar, statusItems: []) == nil)
+        // The user's screen: first status item at 1139.
+        let room = StatusItemClearance.trailingRoom(notch: notch, menuBar: menuBar, statusItems: [item(1139)])
+        #expect(room == 1139 - PanelLayout.wingClearance - Tokens.Radius.notchClosedTop - 1010)
+        // Several: the nearest wins, in any order.
+        #expect(StatusItemClearance.trailingRoom(notch: notch, menuBar: menuBar, statusItems: [item(1500), item(1200), item(1700)])
+            == 1200 - PanelLayout.wingClearance - Tokens.Radius.notchClosedTop - 1010)
+        // Items on another screen (outside this menu bar) and items left of the notch are ignored.
+        #expect(StatusItemClearance.trailingRoom(notch: notch, menuBar: menuBar, statusItems: [item(1100, y: 500), item(2000, y: 2000), item(600)]) == nil)
+        // Touching the notch leaves no room, never a negative one.
+        #expect(StatusItemClearance.trailingRoom(notch: notch, menuBar: menuBar, statusItems: [item(1012)]) == 0)
     }
 
-    @Test func theWindowHoldsTheWidestWingsWithOvershootOnEveryFixture() {
+    @Test func statusItemsLimitOnlyTheRightWing() {
+        let room = StatusItemClearance.trailingRoom(notch: notch, menuBar: menuBar, statusItems: [CGRect(x: 1139, y: 1130, width: 24, height: 39)])!
+        let l = wings(300, 300, status: room)
+        #expect(l.wings.trailing == room && l.wings.showsTrailingText)
+        #expect(l.wings.leading == PanelLayout.wingMaxWidth)
+        #expect(l.visibleRect.maxX + PanelLayout.wingClearance <= 1139)
+        // Short text that fits is not stretched.
+        #expect(wings(0, 30, status: room).wings.trailing == glyph + 30 + inset)
+    }
+
+    @Test func textIsDroppedBeforeTheGlyph() {
+        let tight = WingText.minimumTextWidth + glyph + inset - 1
+        let l = wings(0, 200, status: tight)
+        #expect(l.wings.trailing == glyph)
+        #expect(!l.wings.showsTrailingText)
+        // No room at all: the glyph-only wing is still kept.
+        let none = wings(0, 200, status: 0)
+        #expect(none.wings.trailing == glyph && !none.wings.showsTrailingText)
+        // Just enough room for a truncated line.
+        let enough = wings(0, 200, status: tight + 1)
+        #expect(enough.wings.showsTrailingText && enough.wings.trailing == tight + 1)
+    }
+
+    // MARK: Window and screen edges
+
+    @Test func theWindowHoldsBothWingsAtTheCapWithOvershootOnEveryFixture() {
         for metrics in [ScreenMetrics.mbp14MoreSpace, .mbp14Default, .external1080p, .externalHiddenMenuBar] {
-            let l = NotchGeometry.layout(metrics: metrics, state: .hover, hasActivity: true, wingWidth: PanelLayout.wingMaxWidth)
-            #expect(l.wingWidth == PanelLayout.wingMaxWidth)
+            let l = NotchGeometry.layout(metrics: metrics, state: .hover, hasActivity: true,
+                                         wings: WingRequest(leadingTextWidth: 1000, trailingTextWidth: 1000))
+            #expect(l.wings.leading == PanelLayout.wingMaxWidth && l.wings.trailing == PanelLayout.wingMaxWidth)
             let slack = l.windowFrame.insetBy(dx: NotchGeometry.windowMargin / 2, dy: 0)
             #expect(slack.minX <= l.visibleRect.minX && slack.maxX >= l.visibleRect.maxX)
             #expect(metrics.frame.contains(l.visibleRect))
+            #expect(metrics.frame.contains(l.windowFrame))
         }
     }
 
-    @Test func aNarrowScreenClampsTheWings() {
+    @Test func aNarrowScreenClampsEachWing() {
         let narrow = ScreenMetrics(
             frame: CGRect(x: 0, y: 0, width: 420, height: 300), visibleFrame: CGRect(x: 0, y: 0, width: 420, height: 275),
             safeTop: 0, auxLeft: nil, auxRight: nil
         )
         for state in [NotchState.activity, .hover] {
-            let l = NotchGeometry.layout(metrics: narrow, state: state, hasActivity: true, wingWidth: PanelLayout.wingMaxWidth)
-            #expect(l.wingWidth < PanelLayout.wingMaxWidth)
+            let l = NotchGeometry.layout(metrics: narrow, state: state, hasActivity: true,
+                                         wings: WingRequest(leadingTextWidth: 1000, trailingTextWidth: 1000))
+            #expect(l.wings.leading < PanelLayout.wingMaxWidth && l.wings.trailing < PanelLayout.wingMaxWidth)
             #expect(narrow.frame.contains(l.visibleRect))
-            #expect(l.windowFrame.insetBy(dx: NotchGeometry.windowMargin / 2 - 0.5, dy: 0).contains(
-                CGRect(x: l.visibleRect.minX, y: l.windowFrame.minY + 1, width: l.visibleRect.width, height: 1)))
+            #expect(l.windowFrame.insetBy(dx: NotchGeometry.windowMargin / 2 - 0.5, dy: 0).minX <= l.visibleRect.minX)
+            #expect(l.windowFrame.insetBy(dx: NotchGeometry.windowMargin / 2 - 0.5, dy: 0).maxX >= l.visibleRect.maxX)
         }
-        #expect(NotchGeometry.layout(metrics: narrow, state: .activity, hasActivity: true, wingWidth: 50).wingWidth == 50)
+        let tiny = ScreenMetrics(
+            frame: CGRect(x: 0, y: 0, width: 220, height: 200), visibleFrame: CGRect(x: 0, y: 0, width: 220, height: 175),
+            safeTop: 0, auxLeft: nil, auxRight: nil
+        )
+        let t = NotchGeometry.layout(metrics: tiny, state: .activity, hasActivity: true, wings: WingRequest(leadingTextWidth: 100))
+        #expect(tiny.frame.contains(t.visibleRect))
+        #expect(!t.wings.showsLeadingText)
     }
+
+    @Test func devMachineWindowForTheNewCap() {
+        let l = NotchGeometry.layout(metrics: m, state: .closed)
+        let widestHover = 220 + 2 * PanelLayout.wingMaxWidth + PanelLayout.hoverGrowth.width + 2 * Tokens.Radius.notchClosedTop
+        #expect(l.windowFrame.width == widestHover + 2 * NotchGeometry.windowMargin)
+        #expect(l.windowFrame.midX == notch.midX)
+        #expect(l.windowFrame.maxY == 1169)
+    }
+
+    // MARK: Hover
 
     @Test func hoverMakesRoomForTheHintUnlessHoverOpens() {
         let hint = NotchGeometry.layout(metrics: m, state: .hover, hoverHint: true)
@@ -303,16 +394,19 @@ struct WingAndHoverTests {
         #expect(!compact.hits(CGPoint(x: notch.midX, y: notch.minY - 12)))
     }
 
-    @Test func hoverComposesWithWidenedWings() {
-        let wing: CGFloat = 120
-        let activity = NotchGeometry.layout(metrics: m, state: .activity, hasActivity: true, wingWidth: wing)
-        let hover = NotchGeometry.layout(metrics: m, state: .hover, hasActivity: true, wingWidth: wing)
-        // Same wings, swollen by exactly the hover growth: the spring only grows the shape.
-        #expect(hover.wingWidth == activity.wingWidth)
+    @Test func hoverComposesWithAsymmetricWings() {
+        let activity = wings(200, 50)
+        let hover = wings(200, 50, state: .hover)
+        // Same wings, swollen by exactly the hover growth around them; the notch does not move.
+        #expect(hover.wings == activity.wings)
         #expect(hover.shapeRect.width == activity.shapeRect.width + PanelLayout.hoverGrowth.width)
         #expect(hover.shapeRect.height == activity.shapeRect.height + PanelLayout.hoverGrowth.height)
-        #expect(hover.visibleRect.midX == activity.visibleRect.midX)
-        // Clickable: the swell around the notch. Not: the wings, nor the area below them, nor the menu bar beyond.
+        #expect(hover.visibleRect.minX == activity.visibleRect.minX - PanelLayout.hoverGrowth.width / 2)
+        #expect(hover.visibleRect.maxX == activity.visibleRect.maxX + PanelLayout.hoverGrowth.width / 2)
+        // The hint is centred under the hardware notch, not under the lopsided bar.
+        #expect(hover.visibleRect.midX + hover.notchOffsetInShape == notch.midX)
+        #expect(hover.notchOffsetInShape > 0)
+        // Clickable: the swell around the notch. Not: the wings, the area below them, the menu bar beyond.
         #expect(hover.hits(CGPoint(x: notch.midX, y: notch.minY - 12)))
         #expect(hover.hits(CGPoint(x: notch.minX - PanelLayout.hoverGrowth.width / 2, y: notch.midY)))
         #expect(!hover.hits(CGPoint(x: notch.minX - 20, y: notch.midY)))

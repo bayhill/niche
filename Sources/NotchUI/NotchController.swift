@@ -44,8 +44,12 @@ public final class NotchController: NotchControlling {
     private var toggleKey: HotKey?
     private var frameMonitor: FrameRateMonitor?
     private var fullscreen = false
-    /// Wing width for the current activity's text (`WingText`), before clamping to the screen.
-    private var wingWidth = PanelLayout.wingWidth
+    /// What the current activity's text asks of the wings (`WingText.request(for:)`), before clamping.
+    private var wingRequest = WingRequest.none
+    /// Room before the nearest menu-bar status item right of the notch, re-measured on activity, app, Space and
+    /// screen changes and every few seconds (status items come and go).
+    private var statusRoom: CGFloat?
+    private var statusTask: Task<Void, Never>?
     private var moduleSignature: [ModuleSignature] = []
     private var drag = DragTracking()
 
@@ -109,6 +113,13 @@ public final class NotchController: NotchControlling {
         installMonitors()
         installObservers()
         refreshDragBaseline()
+        statusTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(5))
+                guard let self, self.running else { return }
+                self.measureStatusItems()
+            }
+        }
 
         panel.orderFrontRegardless()
         applyDebugOptions()
@@ -127,6 +138,7 @@ public final class NotchController: NotchControlling {
         timerTasks.removeAll()
         expiryTask?.cancel()
         demoTask?.cancel()
+        statusTask?.cancel()
         drag.poll?.cancel()
         drag = DragTracking()
         toggleKey?.unregister(); toggleKey = nil
@@ -202,8 +214,8 @@ public final class NotchController: NotchControlling {
 
     private func currentLayout() -> NotchLayout {
         NotchGeometry.layout(
-            metrics: metrics, state: machine.state, hasActivity: machine.hasActivity, wingWidth: wingWidth,
-            hoverHint: !machine.openOnHover, simulatedNotch: debug.simulateNotch
+            metrics: metrics, state: machine.state, hasActivity: machine.hasActivity, wings: wingRequest,
+            statusRoom: statusRoom, hoverHint: !machine.openOnHover, simulatedNotch: debug.simulateNotch
         )
     }
 
@@ -427,11 +439,13 @@ public final class NotchController: NotchControlling {
         let now = Date()
         let candidates = enabledModules.compactMap(\.liveActivity)
         let chosen = ActivityArbiter.select(candidates, now: now, fullscreen: fullscreen)
-        let wing = chosen.map(WingText.width(for:)) ?? PanelLayout.wingWidth
-        if chosen != model.activity || wing != wingWidth {
-            wingWidth = wing
+        let request = chosen.map(WingText.request(for:)) ?? .none
+        if chosen != model.activity || request != wingRequest {
+            let textChanged = request != wingRequest
+            wingRequest = request
+            if textChanged { measureStatusItems(animate: false) }
             let layout = currentLayout()
-            // Next track: the wings resize and the text cross-fades in one morph; glyphs ride the wing edges.
+            // Next track: each wing resizes on its own and the text cross-fades in one morph; glyphs ride the edges.
             Motion.animate(Motion.morph) {
                 model.activity = chosen
                 model.layout = layout
@@ -447,6 +461,17 @@ public final class NotchController: NotchControlling {
                 self?.refreshActivity()
             }
         }
+    }
+
+    /// Re-reads the status items right of the notch. Only matters while some wing text is asking for room.
+    private func measureStatusItems(animate: Bool = true) {
+        guard wingRequest.trailingTextWidth > 0 else { return }
+        let room = StatusItems.trailingRoom(screen: metrics, notch: model.layout.notchRect)
+        guard room != statusRoom else { return }
+        statusRoom = room
+        guard animate else { return }
+        let layout = currentLayout()
+        Motion.animate(Motion.morph) { model.layout = layout }
     }
 
     private func refreshFullscreen() {
@@ -500,15 +525,20 @@ public final class NotchController: NotchControlling {
         }
         observe(workspace, NSWorkspace.activeSpaceDidChangeNotification) { controller in
             controller.refreshFullscreen()
+            controller.measureStatusItems()
             // The menu bar settles after the space animation; look again once it has.
             Task { @MainActor [weak controller] in
                 try? await Task.sleep(for: .milliseconds(800))
                 controller?.refreshFullscreen()
+                controller?.measureStatusItems()
             }
         }
         // "Hide Others" can hide an accessory app; the notch must never disappear with it.
         observe(center, NSApplication.didHideNotification) { _ in NSApp.unhideWithoutActivation() }
-        observe(workspace, NSWorkspace.didActivateApplicationNotification) { $0.refreshFullscreen() }
+        observe(workspace, NSWorkspace.didActivateApplicationNotification) { controller in
+            controller.refreshFullscreen()
+            controller.measureStatusItems()
+        }
     }
 
     /// The built-in notched display, else the primary display (with a virtual notch).
@@ -524,6 +554,7 @@ public final class NotchController: NotchControlling {
         container?.frame = CGRect(origin: .zero, size: layout.windowFrame.size)
         model.layout = layout
         refreshFullscreen()
+        measureStatusItems()
         updatePointer(NSEvent.mouseLocation)
     }
 

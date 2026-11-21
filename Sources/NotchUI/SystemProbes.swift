@@ -87,3 +87,24 @@ public struct FrameStats: Sendable, Equatable {
 
     public mutating func resetWorst() { worst = 0 }
 }
+
+/// Reads the menu-bar status items (window layer 25) from the window server. Bounds and layers need no permission.
+@MainActor
+enum StatusItems {
+    static func trailingRoom(screen: ScreenMetrics, notch: CGRect) -> CGFloat? {
+        guard let primary = NSScreen.screens.first,
+              let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
+        else { return nil }
+        let primaryHeight = primary.frame.height
+        let items = list.compactMap { info -> CGRect? in
+            guard let layer = info[kCGWindowLayer as String] as? Int, layer == StatusItemClearance.statusItemLayer,
+                  let dict = info[kCGWindowBounds as String] as? NSDictionary,
+                  let cg = CGRect(dictionaryRepresentation: dict)
+            else { return nil }
+            return CGRect(x: cg.minX, y: primaryHeight - cg.maxY, width: cg.width, height: cg.height)
+        }
+        let f = screen.frame
+        let menuBar = CGRect(x: f.minX, y: f.maxY - max(1, screen.menuBarHeight), width: f.width, height: max(1, screen.menuBarHeight))
+        return StatusItemClearance.trailingRoom(notch: notch, menuBar: menuBar, statusItems: items)
+    }
+}

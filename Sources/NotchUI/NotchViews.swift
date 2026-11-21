@@ -134,13 +134,14 @@ private struct NotchContentView: View {
             HoverHintView(progress: model.hintVisible ? 1 : 0)
                 .frame(width: notch.width + PanelLayout.hoverGrowth.width, height: PanelLayout.hoverGrowth.height)
                 .padding(.top, layout.bandHeight)
+                // Centred under the hardware notch, not under a bar made lopsided by unequal wings.
+                .offset(x: layout.notchOffsetInShape)
                 .allowsHitTesting(false)
             if model.state == .activity || model.state == .hover, let activity = model.activity {
-                WingsView(activity: activity, notchWidth: notch.width, wingWidth: layout.wingWidth)
+                WingsView(activity: activity, notchWidth: notch.width, wings: layout.wings)
                     .frame(
                         width: NotchGeometry.bodyWidth(
-                            model.state, notch: notch, hasActivity: true, wingWidth: layout.wingWidth,
-                            hoverHint: layout.hoverHint
+                            model.state, notch: notch, hasActivity: true, wings: layout.wings, hoverHint: layout.hoverHint
                         ),
                         height: layout.bandHeight
                     )
@@ -180,7 +181,7 @@ private struct NotchContentView: View {
 private struct WingsView: View {
     let activity: LiveActivity
     let notchWidth: CGFloat
-    let wingWidth: CGFloat
+    let wings: WingWidths
 
     var body: some View {
         HStack(spacing: 0) {
@@ -189,26 +190,26 @@ private struct WingsView: View {
                 ActivityGlyphView(glyph: activity.leading)
                     .notchHero(activity.module)
                     .frame(width: PanelLayout.wingWidth)
-                WingLine(text: activity.leadingText, color: Tokens.Colors.textPrimary, alignment: .leading)
+                WingLine(text: wings.showsLeadingText ? activity.leadingText : nil, color: Tokens.Colors.textPrimary, alignment: .leading)
                     .padding(.trailing, WingText.innerInset)
             }
-            .frame(width: wingWidth, alignment: .leading)
+            .frame(width: wings.leading, alignment: .leading)
 
             Spacer(minLength: notchWidth)
 
             // Right wing, notch outward: the text, then the glyph at the outer edge.
             HStack(spacing: 0) {
-                WingLine(text: activity.trailingText, color: Tokens.Colors.textSecondary, alignment: .trailing)
+                WingLine(text: wings.showsTrailingText ? activity.trailingText : nil, color: Tokens.Colors.textSecondary, alignment: .trailing)
                     .padding(.leading, WingText.innerInset)
                 if let trailing = activity.trailing {
                     ActivityGlyphView(glyph: trailing).frame(width: PanelLayout.wingWidth)
-                } else if !(activity.trailingText ?? "").isEmpty {
+                } else if wings.showsTrailingText {
                     Color.clear.frame(width: WingText.outerInset)
                 } else {
                     Color.clear.frame(width: PanelLayout.wingWidth)
                 }
             }
-            .frame(width: wingWidth, alignment: .trailing)
+            .frame(width: wings.trailing, alignment: .trailing)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(activity.accessibilityLabel)
