@@ -166,6 +166,7 @@ struct NowPlayingSettings: View {
                 Text("macOS asks once whether Notcher may control Spotify and Music.").font(.caption)
             }
             if let settings = module.settingsStore {
+                Toggle("Show title and artist beside the notch", isOn: settings.binding(NowPlayingModule.showTitleInNotch))
                 Toggle(isOn: settings.binding(NowPlayingModule.ambientArtwork)) {
                     Text("Ambient artwork")
                     Text("Artwork colour blooms through the card")

@@ -24,15 +24,30 @@ public enum NowPlayingSelection: Sendable, Equatable {
 public enum NowPlayingActivity {
     public static let id = "nowPlaying.track"
 
-    public static func make(_ state: NowPlayingState?, updatedAt: Date) -> LiveActivity? {
+    /// Shown only while playing (paused or nothing: `nil`). The `id` is the same for every track so the wings
+    /// animate in place. Never tinted.
+    /// - Parameter showText: title in the left wing, artist (or the album when there is none) in the right wing.
+    public static func make(_ state: NowPlayingState?, updatedAt: Date, showText: Bool = true) -> LiveActivity? {
         guard let state, state.isPlaying else { return nil }
-        let label = [state.title, state.artist].compactMap(\.self).joined(separator: " by ")
+        let title = clean(state.title), artist = clean(state.artist), album = clean(state.album)
+        var label = "Playing"
+        if let title { label += " \(title)" }
+        if let artist { label += " by \(artist)" } else if let album { label += " from \(album)" }
         return LiveActivity(
             id: id, module: .nowPlaying, priority: .ambient,
             leading: state.artwork.map { .image($0) } ?? .symbol("music.note", tint: .primary),
             trailing: .equalizer(playing: true),
-            updatedAt: updatedAt, accessibilityLabel: "Playing \(label)"
+            leadingText: showText ? title : nil,
+            trailingText: showText ? (artist ?? album) : nil,
+            updatedAt: updatedAt, accessibilityLabel: label
         )
+    }
+
+    /// Trimmed, single line, `nil` when empty.
+    static func clean(_ text: String?) -> String? {
+        guard let text else { return nil }
+        let line = text.components(separatedBy: .newlines).joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+        return line.isEmpty ? nil : line
     }
 }
 
@@ -57,6 +72,8 @@ public final class NowPlayingModule: NotchModule {
     public static let adapterCheck = SettingsKey<AdapterCheck?>("nowPlaying.adapterCheck", default: nil)
     /// Let the artwork's colour bloom through the card (`GlassCard(ambient:)`).
     public static let ambientArtwork = SettingsKey("nowPlaying.ambientArtwork", default: true)
+    /// Title and artist as text in the wings beside the closed notch.
+    public static let showTitleInNotch = SettingsKey("nowPlaying.showTitleInNotch", default: true)
 
     public let id = ModuleID.nowPlaying
     public let title = "Now Playing"
@@ -143,6 +160,7 @@ public final class NowPlayingModule: NotchModule {
         settings = context.settings
         log = context.log
         retriedAfterGiveUp = false
+        observeTitleSetting()
         guard adapter != nil else {
             // `mayPrompt` is honoured only here, while the user is enabling the module.
             select(adapterPassed: false, mayPrompt: context.mayPrompt)
@@ -231,11 +249,13 @@ public final class NowPlayingModule: NotchModule {
         isChecking = true
         selection = Task { [weak self, adapterSelfTest] in
             let outcome = await adapterSelfTest()
-            guard !Task.isCancelled, let self else { return }
+            guard let self else { return }
+            // A finished test is evidence even if the module stopped meanwhile: record it, so the next start
+            // does not test again. Only a live, non-superseded run acts on it.
+            self.record(outcome)
+            guard !Task.isCancelled else { return }
             self.isChecking = false
             self.log.notice("adapter self-test: \(String(describing: outcome), privacy: .public)")
-            self.record(outcome)
-            // A stopped module only records the result; it never starts a provider.
             if self.running { decide(outcome) }
         }
     }
@@ -313,9 +333,29 @@ public final class NowPlayingModule: NotchModule {
         if new != nil, verifying, let active, active === adapter { confirmAdapter() }
         guard new != state else { return }
         Motion.animate(Motion.morph) { state = new }
-        let activity = NowPlayingActivity.make(new, updatedAt: now())
-        if !Self.sameContent(activity, liveActivity) { liveActivity = activity }
+        updateActivity()
         if new != nil, case .notAuthorized = phase, let active { phase = .active(active.source) }
+    }
+
+    private var showTitleInNotch: Bool { settings?.get(Self.showTitleInNotch) ?? Self.showTitleInNotch.defaultValue }
+
+    private func updateActivity() {
+        let activity = NowPlayingActivity.make(state, updatedAt: now(), showText: showTitleInNotch)
+        if !Self.sameContent(activity, liveActivity) { liveActivity = activity }
+    }
+
+    /// Re-renders the wings when "Show title and artist beside the notch" is toggled.
+    private func observeTitleSetting() {
+        guard running, let settings else { return }
+        withObservationTracking {
+            _ = settings.get(Self.showTitleInNotch)
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self, self.running else { return }
+                self.updateActivity()
+                self.observeTitleSetting()
+            }
+        }
     }
 
     /// Equal apart from `updatedAt`, so steady playback does not keep re-arbitrating the wings.

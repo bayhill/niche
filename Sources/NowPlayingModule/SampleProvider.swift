@@ -32,6 +32,15 @@ public final class SampleProvider: NowPlayingProvider {
         )
     }
 
+    /// A title and artist too long for the wings, to show truncation.
+    public static var longTrack: NowPlayingState {
+        var s = track
+        s.title = "Music for Airports 1/1 (Remastered 2004 Extended Version)"
+        s.artist = "Brian Eno and the Ambient Orchestra of Somewhere Far"
+        s.album = "Ambient 1: Music for Airports"
+        return s
+    }
+
     /// Generated album art: a soft two-colour gradient with a pale disc. Content, not chrome.
     public static let sampleArtwork: SendableImage? = {
         let size = 192

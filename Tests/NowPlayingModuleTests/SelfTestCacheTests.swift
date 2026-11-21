@@ -81,7 +81,8 @@ final class SelfTestStub: Sendable {
         let first = module(stub: stub)
         await first.start(env.context(for: .nowPlaying))
         #expect(await eventually { stub.count == 1 })
-        first.stop()
+        first.stop() // even if this lands before the result is handled, the finished test is recorded
+        #expect(await eventually { env.settings.get(NowPlayingModule.adapterCheck)?.passed == true })
         let adapter = FakeProvider(.mediaRemote)
         let second = module(stub: stub, adapter: adapter)
         await second.start(env.context(for: .nowPlaying))
