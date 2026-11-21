@@ -1,0 +1,1 @@
+The Notcher app icon, exported at 512 px from `Resources/AppIcon.icns` (drawn by `scripts/make-icon.swift`). Full colour on its own dark body; show it on any ground, never recoloured or cropped. There is no wordmark: set the name "Notcher" in the system font beside it.
