@@ -1,5 +1,6 @@
 import Foundation
 import NotchCore
+import UniformTypeIdentifiers
 
 /// One file reference on the shelf. The shelf only remembers where a file is; it never owns the file.
 public struct ShelfItem: Codable, Sendable, Equatable, Identifiable {
@@ -138,5 +139,34 @@ public enum ShelfFiles {
         let data = try encoder.encode(Envelope(items: items))
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try data.write(to: url, options: .atomic)
+    }
+}
+
+/// What a shelf item is, for its card's label and symbol. Converted outputs are marked as such.
+public struct ShelfItemKind: Sendable, Equatable {
+    public let label: String
+    public let symbol: String
+    /// Whether the thumbnail is a picture that may fill the card (photos, video frames) rather than a page or icon.
+    public let fillsPreview: Bool
+
+    public init(label: String, symbol: String, fillsPreview: Bool = false) {
+        self.label = label; self.symbol = symbol; self.fillsPreview = fillsPreview
+    }
+
+    public static func of(_ item: ShelfItem) -> ShelfItemKind {
+        if item.origin == .converted { return ShelfItemKind(label: "Converted", symbol: "sparkles", fillsPreview: true) }
+        if item.size == nil { return ShelfItemKind(label: "Folder", symbol: "folder") }
+        guard let type = UTType(filenameExtension: item.url.pathExtension.lowercased()) else {
+            return ShelfItemKind(label: "Document", symbol: "doc")
+        }
+        if type.conforms(to: .image) { return ShelfItemKind(label: "Image", symbol: "photo", fillsPreview: true) }
+        if type.conforms(to: .movie) { return ShelfItemKind(label: "Movie", symbol: "film", fillsPreview: true) }
+        if type.conforms(to: .audio) { return ShelfItemKind(label: "Audio", symbol: "waveform") }
+        if type.conforms(to: .pdf) { return ShelfItemKind(label: "PDF", symbol: "doc.richtext") }
+        if type.conforms(to: .archive) { return ShelfItemKind(label: "Archive", symbol: "doc.zipper") }
+        if type.conforms(to: .json) || type.conforms(to: .sourceCode) { return ShelfItemKind(label: "Code", symbol: "curlybraces") }
+        if type.conforms(to: .presentation) { return ShelfItemKind(label: "Presentation", symbol: "rectangle.on.rectangle") }
+        if type.conforms(to: .text) { return ShelfItemKind(label: "Text", symbol: "doc.text") }
+        return ShelfItemKind(label: "Document", symbol: "doc")
     }
 }

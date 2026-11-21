@@ -1,12 +1,15 @@
 import NotchCore
 import SwiftUI
-import UniformTypeIdentifiers
 
-/// The Shelf page: a header and one horizontally scrolling row of file tiles.
+/// The Shelf page: a header and one row of file cards, newest first. Four cards fit the page;
+/// older items scroll in from the right. Same card language as the Clipboard page.
 struct ShelfPage: View {
     let module: ShelfModule
     /// `false` lays the row out without a scroll view; only for off-screen snapshots, which cannot draw one.
     var scrolls = true
+
+    /// Four cards across the page.
+    static let cardWidth = ((PanelLayout.pageSize.width - 3 * Tokens.Spacing.s) / 4).rounded(.down)
 
     var body: some View {
         let items = module.items
@@ -14,13 +17,12 @@ struct ShelfPage: View {
             SectionHeader("Shelf", symbol: "tray.full") {
                 if !items.isEmpty {
                     HStack(spacing: Tokens.Spacing.xs) {
-                        Text(items.count == 1 ? "1 item" : "\(items.count) items")
+                        Text("\(items.count) of \(module.capacity)")
                             .notchStyle(.caption)
                             .contentTransition(.numericText(value: Double(items.count)))
                             .notchHero(.shelf)
-                        Button { module.clear() } label: { Text("Clear").notchStyle(.caption) }
-                            .buttonStyle(RowButtonStyle())
-                            .help("Forget every item (the files stay where they are)")
+                        GlassIconButton("trash", label: "Clear shelf", kind: .plain, size: 20) { module.clear() }
+                            .help("Clear shelf (files stay where they are)")
                     }
                     .transition(.opacity)
                 }
@@ -28,17 +30,14 @@ struct ShelfPage: View {
 
             ZStack {
                 if items.isEmpty {
-                    EmptyState(
-                        symbol: "tray",
-                        title: "Your shelf is empty",
-                        message: "Drop files on the notch to keep them handy. Hold ⌥ to shelve images too."
-                    )
-                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                    EmptyState(symbol: "tray", title: "Drop files on the notch", message: "Hold ⌥ to shelve images instead of converting them.")
+                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
                 } else {
-                    TileRow(scrolls: scrolls) {
+                    CardRow(scrolls: scrolls) {
                         ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                            ShelfTile(item: item, module: module)
-                                .motionAppear(min(index, 8))
+                            ShelfCard(item: item, module: module)
+                                .frame(width: Self.cardWidth)
+                                .motionAppear(min(index, 6))
                                 .transition(.asymmetric(insertion: .identity, removal: .scale(scale: 0.6).combined(with: .opacity)))
                         }
                     }
@@ -52,50 +51,56 @@ struct ShelfPage: View {
     }
 }
 
-/// A horizontal row of tiles that scrolls (and snaps to tiles) when it overflows.
-struct TileRow<Content: View>: View {
+/// One row of cards that scrolls (and snaps to cards) when it overflows.
+struct CardRow<Content: View>: View {
     let scrolls: Bool
     @ViewBuilder let content: Content
 
     var body: some View {
-        let row = HStack(alignment: .top, spacing: Tokens.Spacing.xs) { content }
+        let row = HStack(alignment: .top, spacing: Tokens.Spacing.s) { content }
         if scrolls {
             ScrollView(.horizontal, showsIndicators: false) { row.scrollTargetLayout() }
                 .scrollTargetBehavior(.viewAligned)
                 .scrollEdgeEffectStyle(.soft, for: .horizontal)
         } else {
-            Color.clear.overlay(alignment: .topLeading) { row.fixedSize() }.clipped()
+            Color.clear.overlay(alignment: .topLeading) { row.fixedSize(horizontal: true, vertical: false) }.clipped()
         }
     }
 }
 
-/// One file: picture, name, size. Click reveals in Finder, drag takes the file out, hover offers removal.
-struct ShelfTile: View {
+/// One file: kind, picture, name, then size and age. Click reveals in Finder, drag takes the file out,
+/// hover offers removal.
+struct ShelfCard: View {
     let item: ShelfItem
     let module: ShelfModule
     @State private var hovering = false
 
-    static let width: CGFloat = 104
-    static let pictureHeight: CGFloat = 96
-
     var body: some View {
+        let kind = ShelfItemKind.of(item)
         Button { module.reveal(item) } label: {
-            VStack(spacing: Tokens.Spacing.s) {
-                picture
-                    .frame(width: Self.width - Tokens.Spacing.m, height: Self.pictureHeight)
-                VStack(spacing: 1) {
-                    Text(item.name).notchStyle(.body).lineLimit(1).truncationMode(.middle)
-                    Text(detail).notchStyle(.caption).lineLimit(1)
+            GlassCard {
+                SectionHeader(kind.label, symbol: kind.symbol)
+                picture(kind)
+                Text(item.name).notchStyle(.body).lineLimit(1).truncationMode(.middle)
+                HStack(spacing: Tokens.Spacing.xs) {
+                    Text(item.size.map(Format.bytes) ?? "").notchStyle(.caption).lineLimit(1)
+                    Spacer(minLength: Tokens.Spacing.xs)
+                    AgeText(date: item.addedAt)
                 }
-                .frame(width: Self.width - Tokens.Spacing.m)
             }
-            .padding(.vertical, Tokens.Spacing.xs)
+            .overlay {
+                RoundedRectangle(cornerRadius: Tokens.Radius.card, style: .continuous)
+                    .fill(hovering ? Tokens.Colors.hairline : .clear)
+                    .allowsHitTesting(false)
+            }
         }
-        .buttonStyle(RowButtonStyle())
+        .buttonStyle(CardPressStyle())
         .fileDragSource([item.url])
         .overlay(alignment: .topTrailing) {
             if hovering {
-                GlassIconButton("xmark", label: "Remove from Shelf", size: 20) { module.remove(item.id) }
+                GlassIconButton("xmark", label: "Remove from shelf", kind: .plain, size: 20) { module.remove(item.id) }
+                    .padding(.top, Tokens.Spacing.m - 2)
+                    .padding(.trailing, Tokens.Spacing.s)
                     .transition(.scale(scale: 0.5).combined(with: .opacity))
             }
         }
@@ -104,66 +109,55 @@ struct ShelfTile: View {
         .task(id: item.path) { await module.loadThumbnail(for: item) }
         .help(item.path)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(item.name), \(detail)")
-        .accessibilityHint("Reveals the file in Finder. Drag to move it somewhere else.")
+        .accessibilityLabel("\(kind.label), \(item.name)\(item.size.map { ", " + Format.bytes($0) } ?? "")")
+        .accessibilityHint("Reveals the file in Finder. Drag to move it elsewhere.")
     }
 
-    private var detail: String {
-        guard let size = item.size else { return "Folder" }
-        return Format.bytes(size)
-    }
-
-    @ViewBuilder private var picture: some View {
-        if let thumbnail = module.thumbnail(for: item) {
-            Image(decorative: thumbnail.cgImage, scale: 2)
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .clipShape(RoundedRectangle(cornerRadius: Tokens.Radius.thumbnail, style: .continuous))
-                .shadow(radius: 3, y: 1)
-                .overlay(alignment: .bottomLeading) { badge }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .transition(.opacity)
-        } else {
-            Image(systemName: fallbackSymbol)
-                .resizable()
-                .scaledToFit()
-                .frame(width: 30, height: 30)
-                .foregroundStyle(Tokens.Colors.textSecondary)
-                .frame(width: Self.pictureHeight - Tokens.Spacing.l, height: Self.pictureHeight - Tokens.Spacing.l)
-                .background(Tokens.Colors.cardFill, in: RoundedRectangle(cornerRadius: Tokens.Radius.control, style: .continuous))
-                .overlay(alignment: .bottomLeading) { badge }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-    }
-
-    @ViewBuilder private var badge: some View {
-        if item.origin == .converted { ConvertedBadge().offset(x: -Tokens.Spacing.xs, y: Tokens.Spacing.xs) }
-    }
-
-    private var fallbackSymbol: String {
-        if item.size == nil { return "folder.fill" }
-        guard let type = UTType(filenameExtension: item.url.pathExtension.lowercased()) else { return "doc" }
-        if type.conforms(to: .image) { return "photo" }
-        if type.conforms(to: .movie) { return "film" }
-        if type.conforms(to: .audio) { return "waveform" }
-        if type.conforms(to: .json) || type.conforms(to: .sourceCode) { return "curlybraces" }
-        if type.conforms(to: .archive) { return "doc.zipper" }
-        if type.conforms(to: .pdf) { return "doc.richtext" }
-        if type.conforms(to: .text) { return "doc.text" }
-        return "doc"
+    /// The thumbnail fills the space left in the card; pages and icons fit inside it, photos fill it.
+    private func picture(_ kind: ShelfItemKind) -> some View {
+        Tokens.Colors.cardFill
+            .overlay {
+                if let thumbnail = module.thumbnail(for: item) {
+                    Image(decorative: thumbnail.cgImage, scale: 2)
+                        .resizable()
+                        .aspectRatio(contentMode: kind.fillsPreview ? .fill : .fit)
+                        .padding(kind.fillsPreview ? 0 : Tokens.Spacing.xs)
+                        .transition(.opacity)
+                } else {
+                    Image(systemName: kind.symbol)
+                        .font(NotchTextStyle.display.font)
+                        .foregroundStyle(Tokens.Colors.textTertiary)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: Tokens.Radius.thumbnail, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: Tokens.Radius.thumbnail, style: .continuous)
+                    .strokeBorder(Tokens.Colors.hairline, lineWidth: 1)
+            }
     }
 }
 
-/// Marks a file Notcher made: a small accent sparkle.
-private struct ConvertedBadge: View {
+/// Press feedback for a whole card (the row scale from the design system).
+private struct CardPressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.98 : 1)
+            .motion(Motion.press, value: configuration.isPressed)
+    }
+}
+
+/// "now", "4m", "1h", kept fresh.
+private struct AgeText: View {
+    let date: Date
+
     var body: some View {
-        Image(systemName: "sparkles")
-            .font(NotchTextStyle.label.font)
-            .foregroundStyle(TintRole.primary.color)
-            .padding(Tokens.Spacing.xs)
-            .background(Tokens.Colors.accent, in: .circle)
-            .shadow(radius: 2, y: 1)
-            .help("Converted by Notcher")
-            .accessibilityLabel("Converted")
+        TimelineView(.periodic(from: .now, by: 30)) { context in
+            Text(Format.age(seconds: context.date.timeIntervalSince(date)))
+                .notchStyle(.caption)
+                .monospacedDigit()
+                .contentTransition(.numericText())
+                .lineLimit(1)
+                .fixedSize()
+        }
     }
 }

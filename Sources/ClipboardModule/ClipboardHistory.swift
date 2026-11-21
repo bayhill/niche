@@ -7,15 +7,17 @@ import NotchCore
 public struct ClipboardLimits: Sendable, Equatable {
     public var maxTextBytes = 100_000
     public var maxImageBytes = 20_000_000
-    public var maxTextEntries = 50
+    /// Entries of any kind (the "history size").
+    public var maxEntries = 50
+    /// Of those, at most this many images.
     public var maxImageEntries = 20
 
     public init() {}
 
-    /// The limits for a "history size" setting (text entries). Image entries scale with it: 10 → 4, 25 → 10, 50 → 20.
+    /// The limits for a "history size" setting. Images may take up to 40% of it: 10 → 4, 25 → 10, 50 → 20.
     public init(historySize: Int) {
         let size = min(50, max(1, historySize))
-        maxTextEntries = size
+        maxEntries = size
         maxImageEntries = max(1, min(20, Int((Double(size) * 0.4).rounded())))
     }
 }
@@ -29,18 +31,24 @@ public struct ClipboardEntry: Identifiable, Sendable, Equatable {
     public let preview: String
     /// Image: pixel dimensions, when ImageIO can read them.
     public let pixelSize: CGSize?
+    public let kind: ClipKind
+    /// Display name of the app that was frontmost when this was copied, when known.
+    public let sourceApp: String?
 
-    public init(id: UUID = UUID(), content: ClipboardContent, copiedAt: Date) {
+    public init(id: UUID = UUID(), content: ClipboardContent, copiedAt: Date, sourceApp: String? = nil) {
         self.id = id
         self.content = content
         self.copiedAt = copiedAt
+        self.sourceApp = sourceApp
         switch content {
         case .text(let text):
             preview = Self.preview(of: text)
             pixelSize = nil
+            kind = ClipKind.detect(text)
         case .image(let data, _):
             preview = ""
             pixelSize = ClipboardImages.pixelSize(of: data)
+            kind = .image
         }
     }
 
@@ -82,14 +90,15 @@ public struct ClipboardHistory: Sendable, Equatable {
     public mutating func remove(_ id: ClipboardEntry.ID) { entries.removeAll { $0.id == id } }
     public mutating func clear() { entries.removeAll() }
 
-    /// Drops the oldest text and image entries past their caps.
+    /// Drops the oldest images past the image cap, then the oldest entries past the total cap.
     private mutating func trim() {
-        var texts = 0, images = 0
+        var images = 0
         entries = entries.filter { entry in
-            if entry.isImage { images += 1; return images <= limits.maxImageEntries }
-            texts += 1
-            return texts <= limits.maxTextEntries
+            guard entry.isImage else { return true }
+            images += 1
+            return images <= limits.maxImageEntries
         }
+        if entries.count > limits.maxEntries { entries.removeLast(entries.count - limits.maxEntries) }
     }
 }
 
@@ -99,7 +108,7 @@ public enum ClipboardSkip: Sendable, Equatable {
     case markedPrivate(type: String)
     /// Copied while a password manager was the frontmost app.
     case passwordManager(bundleID: String)
-    /// Files, colours, or anything else that is not text or an image.
+    /// Colours, files with no shelf to take them, or anything else that is not text or an image.
     case unsupported
     case empty
     case tooLarge
@@ -128,6 +137,8 @@ public enum ClipboardPolicy {
 
     public enum Outcome: Sendable, Equatable {
         case record(ClipboardContent)
+        /// Files copied in Finder: they belong on the Shelf, not in the history.
+        case files([URL])
         case skip(ClipboardSkip)
     }
 
@@ -139,7 +150,10 @@ public enum ClipboardPolicy {
 
         let types = pasteboard.types()
         if let marker = types.first(where: privateMarkerTypes.contains) { return .skip(.markedPrivate(type: marker)) }
-        if types.contains(PasteboardTypes.fileURL) { return .skip(.unsupported) }
+        if types.contains(PasteboardTypes.fileURL) {
+            let urls = pasteboard.fileURLs()
+            return urls.isEmpty ? .skip(.unsupported) : .files(urls)
+        }
 
         let imageType = PasteboardTypes.images.first(where: types.contains)
         let hasText = types.contains(PasteboardTypes.plainText)

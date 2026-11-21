@@ -6,7 +6,10 @@ import Testing
 @testable import ClipboardModule
 
 @MainActor
-private final class Frontmost { var bundleID: String? }
+private final class Frontmost {
+    var bundleID: String?
+    var name: String?
+}
 
 @MainActor
 private struct Harness {
@@ -20,7 +23,9 @@ private struct Harness {
         pasteboard = InMemoryPasteboard(access: access)
         let frontmost = self.frontmost
         module = ClipboardModule(
-            pasteboard: pasteboard, frontmostBundleID: { frontmost.bundleID }, pollInterval: pollInterval,
+            pasteboard: pasteboard,
+            frontmostApp: { frontmost.bundleID == nil && frontmost.name == nil ? nil : FrontmostApp(bundleID: frontmost.bundleID, name: frontmost.name) },
+            pollInterval: pollInterval,
             openPrivacySettings: {}
         )
     }
@@ -145,12 +150,9 @@ private let png = TestImage.data(TestImage.solid(width: 4, height: 3))
         #expect(ids.contains("com.apple.keychainaccess"))
     }
 
-    @Test func filesEmptyTextAndOtherTypesAreSkipped() async throws {
+    @Test func emptyTextAndOtherTypesAreSkipped() async throws {
         let h = try Harness(); defer { h.finish() }
         await h.startMonitoring()
-        h.pasteboard.setContents([(PasteboardTypes.fileURL, Data("file:///tmp/a.txt".utf8)), (PasteboardTypes.plainText, Data("a.txt".utf8))])
-        h.module.poll()
-        #expect(h.module.lastSkip == .unsupported)
         h.pasteboard.copy(text: "   \n\t ")
         h.module.poll()
         #expect(h.module.lastSkip == .empty)
@@ -190,16 +192,21 @@ private let png = TestImage.data(TestImage.solid(width: 4, height: 3))
             h.pasteboard.copy(image: png + Data([UInt8(i)]))
             h.module.poll()
         }
-        for i in 0..<55 {
+        // At most 20 images, the newest.
+        #expect(h.module.entries.count == 20)
+        #expect(h.module.entries.first?.content == .image(png + Data([24]), type: "public.png"))
+        #expect(h.module.entries.last?.content == .image(png + Data([5]), type: "public.png"))
+
+        for i in 0..<45 {
             h.pasteboard.copy(text: "text \(i)")
             h.module.poll()
         }
-        #expect(h.module.entries.filter(\.isImage).count == 20)
-        #expect(h.texts().count == 50)
-        #expect(h.texts().first == "text 54")
-        #expect(h.texts().last == "text 5")
-        // The newest images survived.
-        #expect(h.module.entries.filter(\.isImage).first?.content == .image(png + Data([24]), type: "public.png"))
+        // At most 50 entries in all: the oldest images make room.
+        #expect(h.module.entries.count == 50)
+        #expect(h.module.capacity == 50)
+        #expect(h.texts().count == 45)
+        #expect(h.module.entries.filter(\.isImage).count == 5)
+        #expect(h.texts().first == "text 44")
     }
 
     @Test func historySizeSettingShrinksTheCaps() async throws {
@@ -211,6 +218,7 @@ private let png = TestImage.data(TestImage.solid(width: 4, height: 3))
         }
         h.module.setHistorySize(10)
         #expect(h.texts().count == 10)
+        #expect(h.module.capacity == 10)
         #expect(h.env.settings.get(ClipboardModule.historySizeKey) == 10)
         #expect(ClipboardLimits(historySize: 10).maxImageEntries == 4)
         #expect(ClipboardLimits(historySize: 25).maxImageEntries == 10)
@@ -276,6 +284,7 @@ private let png = TestImage.data(TestImage.solid(width: 4, height: 3))
         h.module.poll()
         #expect(h.module.canConvert)
         let image = try #require(h.module.entries.first(where: { $0.isImage }))
+        #expect(image.kind == .image)
         h.module.convert(image)
         h.module.convert(h.module.entries[0])  // text: ignored
         #expect(h.env.converter.requests.count == 1)
@@ -371,6 +380,122 @@ private let png = TestImage.data(TestImage.solid(width: 4, height: 3))
     }
 }
 
+@MainActor @Suite struct ClipboardRound2Tests {
+    @Test func sourceAppIsRecordedAtCopyTime() async throws {
+        let h = try Harness(); defer { h.finish() }
+        await h.startMonitoring()
+        h.frontmost.bundleID = "com.apple.Safari"
+        h.frontmost.name = "Safari"
+        h.pasteboard.copy(text: "https://apple.com")
+        h.module.poll()
+        h.frontmost.bundleID = nil
+        h.frontmost.name = nil
+        h.pasteboard.copy(text: "unknown origin")
+        h.module.poll()
+        #expect(h.module.entries.map(\.sourceApp) == [nil, "Safari"])
+        #expect(h.module.entries[1].kind == .link(display: "apple.com"))
+    }
+
+    @Test func finderFilesGoToTheShelfNotTheHistory() async throws {
+        let h = try Harness(); defer { h.finish() }
+        await h.startMonitoring()
+        let files = [URL(fileURLWithPath: "/tmp/a.pdf"), URL(fileURLWithPath: "/tmp/b c.png")]
+        h.pasteboard.copy(files: files)
+        h.module.poll()
+        #expect(h.module.entries.isEmpty)
+        #expect(h.env.shelf.added.count == 1)
+        #expect(h.env.shelf.added.first?.urls == files)
+        #expect(h.env.shelf.added.first?.origin == .clipboard)
+    }
+
+    @Test func concealedFilesAreNotShelved() async throws {
+        let h = try Harness(); defer { h.finish() }
+        await h.startMonitoring()
+        h.pasteboard.copy(files: [URL(fileURLWithPath: "/tmp/secret.key")], markers: ["org.nspasteboard.ConcealedType"])
+        h.module.poll()
+        #expect(h.env.shelf.added.isEmpty)
+        #expect(h.module.lastSkip == .markedPrivate(type: "org.nspasteboard.ConcealedType"))
+    }
+
+    @Test func filesWithoutAShelfAreSkipped() async throws {
+        let h = try Harness(); defer { h.finish() }
+        h.env.services.shelf = nil
+        await h.startMonitoring()
+        h.pasteboard.copy(files: [URL(fileURLWithPath: "/tmp/a.txt")])
+        h.module.poll()
+        #expect(h.module.entries.isEmpty)
+        #expect(h.module.lastSkip == .unsupported)
+    }
+
+    @Test func removeForgetsOneEntry() async throws {
+        let h = try Harness(); defer { h.finish() }
+        await h.startMonitoring()
+        for text in ["a", "b", "c"] {
+            h.pasteboard.copy(text: text)
+            h.module.poll()
+        }
+        h.module.remove(h.module.entries[1].id)
+        #expect(h.texts() == ["c", "a"])
+        #expect(h.pasteboard.writes.isEmpty)
+    }
+
+    @Test func ageText() {
+        #expect(Format.age(seconds: 0) == "now")
+        #expect(Format.age(seconds: 59) == "now")
+        #expect(Format.age(seconds: 4 * 60 + 30) == "4m")
+        #expect(Format.age(seconds: 3600) == "1h")
+        #expect(Format.age(seconds: 3 * 86400) == "3d")
+    }
+
+    @Test func sampleShowsEveryKind() {
+        let kinds = ClipboardModule.sample().entries.map(\.kind)
+        #expect(kinds.contains(.text))
+        #expect(kinds.contains(.image))
+        #expect(kinds.contains { if case .link = $0 { true } else { false } })
+        #expect(kinds.contains { if case .colour = $0 { true } else { false } })
+        #expect(ClipboardModule.sample().entries.allSatisfy { $0.sourceApp != nil })
+    }
+}
+
+@Suite struct ClipKindTests {
+    @Test(arguments: [
+        ("#409EFF", "#409EFF"), ("#409eff", "#409EFF"), ("  #fff\n", "#FFFFFF"), ("#0a3", "#00AA33"),
+        ("rgb(64, 158, 255)", "#409EFF"), ("RGB(64,158,255)", "#409EFF"), ("rgb(64 158 255)", "#409EFF"),
+        ("rgba(64, 158, 255, 0.5)", "#409EFF"), ("rgb(64 158 255 / 50%)", "#409EFF"),
+    ])
+    func colours(input: String, hex: String) {
+        guard case .colour(let colour) = ClipKind.detect(input) else { Issue.record("\(input) is not a colour"); return }
+        #expect(colour.hex == hex)
+    }
+
+    @Test(arguments: [
+        "409EFF", "#12345", "#1234567", "#ggg", "rgb(300, 0, 0)", "rgb(1, 2)", "rgba(1, 2, 3, 4)", "rgb(1, 2, 3, 0.5)",
+        "colour #409EFF", "#409EFF #000000", "hsl(210, 100%, 63%)",
+    ])
+    func ambiguousColoursStayText(input: String) {
+        #expect(ClipKind.detect(input) == .text)
+    }
+
+    @Test func links() {
+        #expect(ClipKind.detect("https://developer.apple.com/documentation/swiftui/glass") == .link(display: "developer.apple.com/documentation/swiftui/glass"))
+        #expect(ClipKind.detect("http://www.apple.com/") == .link(display: "apple.com"))
+        #expect(ClipKind.detect(" https://example.com/a?b=c#d \n") == .link(display: "example.com/a?b=c#d"))
+        #expect(ClipKind.detect("see https://apple.com") == .text)
+        #expect(ClipKind.detect("https://apple.com\nhttps://swift.org") == .text)
+        #expect(ClipKind.detect("ftp://files.example.com") == .text)
+        #expect(ClipKind.detect("http://localhost:8080") == .text)
+        #expect(ClipKind.detect("mailto:someone@example.com") == .text)
+    }
+
+    @Test func plainText() {
+        #expect(ClipKind.detect("Hello there") == .text)
+        #expect(ClipKind.detect("") == .text)
+        #expect(ClipKind.text.label == "Text" && ClipKind.image.label == "Image")
+        #expect(ClipKind.link(display: "x").label == "Link")
+        #expect(ClipKind.colour(ClipColour(red: 0, green: 0, blue: 0)).label == "Colour")
+    }
+}
+
 @Suite struct ClipboardHistoryTests {
     @Test func previewCollapsesWhitespace() {
         let entry = ClipboardEntry(content: .text("  func   main() {\n\n\tprint(1)\n}  "), copiedAt: .now)
@@ -420,6 +545,12 @@ private let png = TestImage.data(TestImage.solid(width: 4, height: 3))
 
         adapter.write(.image(png, type: "public.png"))
         #expect(adapter.data(forType: "public.png") == png)
+
+        let file = URL(fileURLWithPath: "/tmp/notcher-test-file.txt")
+        named.clearContents()
+        named.writeObjects([file as NSURL])
+        #expect(adapter.fileURLs() == [file])
+        #expect(ClipboardPolicy.evaluate(adapter, frontmostBundleID: nil, limits: ClipboardLimits()) == .files([file]))
     }
 }
 

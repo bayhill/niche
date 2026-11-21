@@ -22,14 +22,15 @@ enum ShelfSamples {
         Sample(name: "launch-keynote.mov", size: 48_500_000, origin: .dropped, picture: (320, 180, 0.38)),
     ]
 
-    static func make() -> ([ShelfItem], [String: SendableImage]) {
-        let base = Date(timeIntervalSince1970: 1_795_000_000)
+    private static let minutesAgo: [Double] = [0.3, 6, 22, 41, 75, 140, 300]
+
+    static func make(now: Date = Date()) -> ([ShelfItem], [String: SendableImage]) {
         var items: [ShelfItem] = []
         var thumbnails: [String: SendableImage] = [:]
         for (index, sample) in samples.enumerated() {
             let item = ShelfItem(
                 path: "/Users/Shared/Notcher Samples/\(sample.name)", origin: sample.origin,
-                addedAt: base.addingTimeInterval(-Double(index) * 600), size: sample.size
+                addedAt: now.addingTimeInterval(-minutesAgo[index % minutesAgo.count] * 60), size: sample.size
             )
             items.append(item)
             if let (w, h, hue) = sample.picture, let image = gradient(width: w, height: h, hue: hue, page: sample.name.hasSuffix(".pdf")) {

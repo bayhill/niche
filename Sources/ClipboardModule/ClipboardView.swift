@@ -1,11 +1,15 @@
 import NotchCore
 import SwiftUI
 
-/// The Clipboard page: a header and a horizontally scrolling row of recent copies, newest first.
+/// The Clipboard page: a header and one row of clip cards, newest first. Four cards fit the page;
+/// older clips scroll in from the right.
 struct ClipboardPage: View {
     let module: ClipboardModule
     /// `false` lays the row out without a scroll view; only for off-screen snapshots, which cannot draw one.
     var scrolls = true
+
+    /// Four cards across the page.
+    static let cardWidth = ((PanelLayout.pageSize.width - 3 * Tokens.Spacing.s) / 4).rounded(.down)
 
     var body: some View {
         let entries = module.entries
@@ -14,12 +18,10 @@ struct ClipboardPage: View {
             SectionHeader("Clipboard", symbol: "doc.on.clipboard") {
                 if showsList {
                     HStack(spacing: Tokens.Spacing.xs) {
-                        Text(entries.count == 1 ? "1 copy" : "\(entries.count) copies")
+                        Text("\(entries.count) of \(module.capacity)")
                             .notchStyle(.caption)
                             .contentTransition(.numericText(value: Double(entries.count)))
-                        Button { module.clear() } label: { Text("Clear").notchStyle(.caption) }
-                            .buttonStyle(RowButtonStyle())
-                            .help("Forget every copy")
+                        GlassIconButton("trash", label: "Clear history", kind: .plain, size: 20) { module.clear() }
                     }
                     .transition(.opacity)
                 }
@@ -29,39 +31,40 @@ struct ClipboardPage: View {
                 switch module.status {
                 case .off:
                     StatusMessage(
-                        symbol: "doc.on.clipboard", title: "Clipboard history is off",
-                        message: "Keep the last things you copy at hand. Stays in memory; passwords are skipped."
+                        symbol: "doc.on.clipboard", title: "Turn on clipboard history",
+                        message: "Recent text and images stay in memory only. Passwords are skipped."
                     ) {
                         GlassButton("Turn on", symbol: "power", prominence: .accent) { module.turnOn() }
                     }
                     .transition(.opacity)
                 case .paused:
                     StatusMessage(
-                        symbol: "pause.circle", title: "Clipboard history is paused",
-                        message: "macOS asks before Notcher reads what you copy. Allow it in Privacy & Security to skip this."
+                        symbol: "pause.circle", title: "Resume clipboard history",
+                        message: "macOS asks before each read. Allowing Notcher in Privacy & Security skips this step."
                     ) {
                         GlassButton("Resume", symbol: "play.fill", prominence: .accent) { module.resume() }
                     }
                     .transition(.opacity)
                 case .denied:
                     StatusMessage(
-                        symbol: "hand.raised", title: "macOS is blocking clipboard access",
-                        message: "Allow Notcher to paste from other apps in System Settings › Privacy & Security."
+                        symbol: "hand.raised", title: "Allow clipboard access in System Settings",
+                        message: "Privacy & Security lists Notcher under pasting from other apps."
                     ) {
                         HStack(spacing: Tokens.Spacing.s) {
                             GlassButton("Open Settings", symbol: "gear") { module.openSettings() }
-                            GlassButton("Try Again") { module.resume() }
+                            GlassButton("Try again") { module.resume() }
                         }
                     }
                     .transition(.opacity)
                 case .monitoring where entries.isEmpty:
-                    EmptyState(symbol: "doc.on.clipboard", title: "Nothing copied yet", message: "Copy some text or an image and it appears here.")
+                    EmptyState(symbol: "doc.on.clipboard", title: "Copy text or an image", message: "Recent copies collect here.")
                         .transition(.opacity)
                 case .monitoring:
-                    ClipTileRow(scrolls: scrolls) {
+                    CardRow(scrolls: scrolls) {
                         ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
-                            ClipboardTile(entry: entry, module: module)
-                                .motionAppear(min(index, 8))
+                            ClipCard(entry: entry, module: module)
+                                .frame(width: Self.cardWidth)
+                                .motionAppear(min(index, 6))
                                 .transition(.asymmetric(insertion: .identity, removal: .scale(scale: 0.6).combined(with: .opacity)))
                         }
                     }
@@ -90,8 +93,8 @@ private struct StatusMessage<Actions: View>: View {
     }
 }
 
-/// A horizontal row of tiles that scrolls (and snaps to tiles) when it overflows.
-private struct ClipTileRow<Content: View>: View {
+/// One row of cards that scrolls (and snaps to cards) when it overflows.
+private struct CardRow<Content: View>: View {
     let scrolls: Bool
     @ViewBuilder let content: Content
 
@@ -107,86 +110,89 @@ private struct ClipTileRow<Content: View>: View {
     }
 }
 
-/// One copy. Click puts it back on the clipboard; images also offer conversion to WebP.
-struct ClipboardTile: View {
+/// One clip: kind, preview, source app and age. Click copies it again; hover offers removal.
+struct ClipCard: View {
     let entry: ClipboardEntry
     let module: ClipboardModule
     @State private var hovering = false
 
-    static let width: CGFloat = 150
-
     var body: some View {
         let confirmed = module.confirmedID == entry.id
         Button { module.copy(entry) } label: {
-            GlassCard(padding: Tokens.Spacing.s + Tokens.Spacing.xs / 2, spacing: Tokens.Spacing.s, highlighted: confirmed) {
+            GlassCard(highlighted: confirmed) {
+                SectionHeader(entry.kind.label, symbol: confirmed ? "checkmark" : entry.kind.symbol) {
+                    // Space for the header actions, which sit outside the button.
+                    Color.clear.frame(width: 1)
+                }
+                preview
                 HStack(spacing: Tokens.Spacing.xs) {
-                    Image(systemName: kind.symbol).font(NotchTextStyle.label.font).foregroundStyle(Tokens.Colors.textTertiary)
-                    Text(kind.label).notchStyle(.label)
+                    Text(entry.sourceApp ?? "").notchStyle(.caption).lineLimit(1)
                     Spacer(minLength: Tokens.Spacing.xs)
                     AgeText(date: entry.copiedAt)
                 }
-                content
             }
             .overlay {
                 RoundedRectangle(cornerRadius: Tokens.Radius.card, style: .continuous)
                     .fill(hovering && !confirmed ? Tokens.Colors.hairline : .clear)
                     .allowsHitTesting(false)
             }
-            .frame(width: Self.width)
         }
-        .buttonStyle(TilePressStyle())
-        .overlay(alignment: .bottomTrailing) {
-            if entry.isImage, module.canConvert {
-                GlassIconButton("wand.and.sparkles", label: "Convert to WebP", size: 26) { module.convert(entry) }
-                    .padding(Tokens.Spacing.s + Tokens.Spacing.xs)
-                    .opacity(hovering ? 1 : 0.85)
+        .buttonStyle(CardPressStyle())
+        .overlay(alignment: .topTrailing) {
+            HStack(spacing: 0) {
+                if entry.isImage, module.canConvert {
+                    GlassIconButton("wand.and.sparkles", label: "Convert to WebP", kind: .plain, size: 20) { module.convert(entry) }
+                }
+                if hovering {
+                    GlassIconButton("xmark", label: "Remove from history", kind: .plain, size: 20) { module.remove(entry.id) }
+                        .transition(.scale(scale: 0.5).combined(with: .opacity))
+                }
             }
-        }
-        .overlay {
-            if confirmed {
-                Label("Copied", systemImage: "checkmark.circle.fill")
-                    .font(NotchTextStyle.title.font)
-                    .foregroundStyle(Tokens.Colors.textPrimary)
-                    .symbolEffect(.bounce, value: confirmed)
-                    .padding(.horizontal, Tokens.Spacing.m)
-                    .padding(.vertical, Tokens.Spacing.s)
-                    .background(Tokens.Colors.accent, in: .capsule)
-                    .shadow(radius: 6, y: 2)
-                    .transition(.scale(scale: 0.6).combined(with: .opacity))
-                    .allowsHitTesting(false)
-            }
+            .padding(.top, Tokens.Spacing.m - 2)
+            .padding(.trailing, Tokens.Spacing.s)
         }
         .onHover { hovering = $0 }
         .motion(Motion.quick, value: hovering)
-        .help(entry.isImage ? "Click to copy this image again" : "Click to copy this text again")
+        .help("Copy again")
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(entry.isImage ? "Image, \(dimensions ?? "unknown size")" : entry.preview)
+        .accessibilityLabel(accessibilityText)
     }
 
-    @ViewBuilder private var content: some View {
-        switch entry.content {
+    @ViewBuilder private var preview: some View {
+        switch entry.kind {
         case .text:
-            Text(entry.preview)
-                .notchStyle(.body)
-                .lineLimit(5)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        case .image:
-            VStack(alignment: .leading, spacing: Tokens.Spacing.xs) {
-                // The picture fills whatever room is left without ever widening the tile.
-                Tokens.Colors.cardFill
+            Text(entry.preview).notchStyle(.body).lineLimit(5).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        case .link(let display):
+            Text(display).notchStyle(.body).lineLimit(5).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        case .colour(let colour):
+            VStack(alignment: .leading, spacing: Tokens.Spacing.s) {
+                RoundedRectangle(cornerRadius: Tokens.Radius.thumbnail, style: .continuous)
+                    .fill(Color(red: Double(colour.red) / 255, green: Double(colour.green) / 255, blue: Double(colour.blue) / 255))
                     .overlay {
-                        if let thumbnail = module.thumbnail(for: entry.id) {
-                            Image(decorative: thumbnail.cgImage, scale: 2)
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                                .transition(.opacity)
-                        } else {
-                            Image(systemName: "photo").foregroundStyle(Tokens.Colors.textTertiary)
-                        }
+                        RoundedRectangle(cornerRadius: Tokens.Radius.thumbnail, style: .continuous)
+                            .strokeBorder(Tokens.Colors.hairline, lineWidth: 1)
                     }
-                    .clipShape(RoundedRectangle(cornerRadius: Tokens.Radius.thumbnail, style: .continuous))
-                if let dimensions { Text(dimensions).font(NotchTextStyle.numeric.font).foregroundStyle(Tokens.Colors.textSecondary).lineLimit(1) }
+                Text(colour.hex).notchStyle(.numeric).lineLimit(1)
             }
+        case .image:
+            // The picture fills whatever room is left without ever widening the card.
+            Tokens.Colors.cardFill
+                .overlay {
+                    if let thumbnail = module.thumbnail(for: entry.id) {
+                        Image(decorative: thumbnail.cgImage, scale: 2)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .transition(.opacity)
+                    } else {
+                        Image(systemName: "photo").foregroundStyle(Tokens.Colors.textTertiary)
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: Tokens.Radius.thumbnail, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: Tokens.Radius.thumbnail, style: .continuous)
+                        .strokeBorder(Tokens.Colors.hairline, lineWidth: 1)
+                }
+                .help(dimensions ?? "Image")
         }
     }
 
@@ -194,44 +200,39 @@ struct ClipboardTile: View {
         entry.pixelSize.map { "\(Int($0.width)) × \(Int($0.height))" }
     }
 
-    private var kind: (symbol: String, label: String) {
-        switch entry.content {
-        case .image: ("photo", "Image")
-        case .text(let text): ClipboardPolicy.looksLikeLink(text) ? ("link", "Link") : ("text.alignleft", "Text")
+    private var accessibilityText: String {
+        let source = entry.sourceApp.map { ", from \($0)" } ?? ""
+        switch entry.kind {
+        case .text: return "Text\(source): \(entry.preview)"
+        case .link(let display): return "Link\(source): \(display)"
+        case .colour(let colour): return "Colour\(source): \(colour.hex)"
+        case .image: return "Image\(source), \(dimensions ?? "unknown size")"
         }
     }
 }
 
-/// Press feedback for a whole tile.
-private struct TilePressStyle: ButtonStyle {
+/// Press feedback for a whole card (the row scale from the design system).
+private struct CardPressStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .scaleEffect(configuration.isPressed ? 0.98 : 1)
             .motion(Motion.press, value: configuration.isPressed)
     }
 }
 
-/// "now", "4m", "2h", "3d", kept fresh.
+/// "now", "4m", "1h", kept fresh.
 private struct AgeText: View {
     let date: Date
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
-            Text(Self.age(from: date, to: context.date))
+            Text(Format.age(seconds: context.date.timeIntervalSince(date)))
                 .notchStyle(.caption)
+                .monospacedDigit()
                 .contentTransition(.numericText())
                 .lineLimit(1)
+                .fixedSize()
         }
-    }
-
-    static func age(from date: Date, to now: Date) -> String {
-        let seconds = max(0, now.timeIntervalSince(date))
-        if seconds < 60 { return "now" }
-        let minutes = Int(seconds / 60)
-        if minutes < 60 { return "\(minutes)m" }
-        let hours = minutes / 60
-        if hours < 24 { return "\(hours)h" }
-        return "\(hours / 24)d"
     }
 }
 
@@ -252,20 +253,19 @@ struct ClipboardSettings: View {
                     set: { module.setHistorySize($0) }
                 )) {
                     ForEach(ClipboardModule.historySizes, id: \.self) { size in
-                        let limits = ClipboardLimits(historySize: size)
-                        Text("\(limits.maxTextEntries) texts, \(limits.maxImageEntries) images").tag(size)
+                        Text("\(size) clips, up to \(ClipboardLimits(historySize: size).maxImageEntries) images").tag(size)
                     }
                 }
             } footer: {
                 Text(
-                    "History stays in memory and is never written to disk. Not recorded: copies marked private or transient "
-                        + "(passwords), anything copied while 1Password, Bitwarden, Passwords or Keychain Access is in front, "
-                        + "files, text over 100 KB and images over 20 MB."
+                    "History stays in memory and is never written to disk. Files copied in Finder go to the Shelf. "
+                        + "Not recorded: copies marked private or transient (passwords), anything copied while 1Password, "
+                        + "Bitwarden, Passwords or Keychain Access is in front, text over 100 KB and images over 20 MB."
                 )
             }
             if module.status == .denied {
                 Section {
-                    LabeledContent("macOS is blocking clipboard access") {
+                    LabeledContent("macOS blocks clipboard access") {
                         Button("Open System Settings") { module.openSettings() }
                     }
                 }

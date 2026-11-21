@@ -10,22 +10,28 @@ enum ClipboardSamples {
         var entries: [ClipboardEntry] = []
         var thumbnails: [ClipboardEntry.ID: SendableImage] = [:]
 
-        func text(_ s: String, minutesAgo: Double) {
-            entries.append(ClipboardEntry(content: .text(s), copiedAt: now.addingTimeInterval(-minutesAgo * 60)))
+        func text(_ s: String, from app: String, minutesAgo: Double) {
+            entries.append(ClipboardEntry(content: .text(s), copiedAt: now.addingTimeInterval(-minutesAgo * 60), sourceApp: app))
         }
-        func image(width: Int, height: Int, hue: Double, minutesAgo: Double) {
+        func image(width: Int, height: Int, hue: Double, from app: String, minutesAgo: Double) {
             guard let cg = picture(width: width, height: height, hue: hue), let data = png(cg) else { return }
-            let entry = ClipboardEntry(content: .image(data, type: "public.png"), copiedAt: now.addingTimeInterval(-minutesAgo * 60))
+            let entry = ClipboardEntry(
+                content: .image(data, type: "public.png"), copiedAt: now.addingTimeInterval(-minutesAgo * 60), sourceApp: app
+            )
             entries.append(entry)
             thumbnails[entry.id] = ClipboardImages.thumbnail(of: data, maxPixels: 360)
         }
 
-        text("Let's ship the notch build on Friday. QA signed off on the WebP pipeline and the shelf.", minutesAgo: 0.2)
-        image(width: 1600, height: 900, hue: 0.58, minutesAgo: 3)
-        text("https://developer.apple.com/documentation/appkit/nspasteboard", minutesAgo: 9)
-        text("swift build -c release && scripts/bundle.sh && scripts/run.sh --force-state expanded", minutesAgo: 26)
-        image(width: 1080, height: 1080, hue: 0.92, minutesAgo: 48)
-        text("Kungsgatan 12, 111 35 Stockholm", minutesAgo: 95)
+        text(
+            "Keep the top cap pure black so the panel reads as part of the hardware, then let the glass take over.",
+            from: "Notes", minutesAgo: 0.2
+        )
+        text("https://developer.apple.com/documentation/swiftui/glass", from: "Safari", minutesAgo: 4)
+        image(width: 1600, height: 900, hue: 0.58, from: "Preview", minutesAgo: 18)
+        text("#409EFF", from: "Sketchbook", minutesAgo: 64)
+        text("swift build -c release && scripts/bundle.sh && scripts/run.sh --force-state expanded", from: "Terminal", minutesAgo: 95)
+        image(width: 1080, height: 1080, hue: 0.92, from: "Photos", minutesAgo: 130)
+        text("rgb(48, 217, 122)", from: "Figma", minutesAgo: 200)
         return (entries, thumbnails)
     }
 

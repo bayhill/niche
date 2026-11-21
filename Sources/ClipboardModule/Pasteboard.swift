@@ -32,6 +32,8 @@ public protocol PasteboardAccessing: AnyObject {
     func types() -> [String]
     func string() -> String?
     func data(forType type: String) -> Data?
+    /// File URLs on the pasteboard (files copied in Finder).
+    func fileURLs() -> [URL]
     /// Replaces the contents and returns the change count afterwards.
     @discardableResult func write(_ content: ClipboardContent) -> Int
 }
@@ -68,6 +70,11 @@ public final class SystemPasteboard: PasteboardAccessing {
     public func types() -> [String] { pasteboard.types?.map(\.rawValue) ?? [] }
     public func string() -> String? { pasteboard.string(forType: .string) }
     public func data(forType type: String) -> Data? { pasteboard.data(forType: NSPasteboard.PasteboardType(type)) }
+
+    public func fileURLs() -> [URL] {
+        let objects = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true])
+        return (objects as? [URL]) ?? []
+    }
 
     @discardableResult
     public func write(_ content: ClipboardContent) -> Int {
@@ -110,6 +117,13 @@ public final class InMemoryPasteboard: PasteboardAccessing {
         return contents.first { $0.type == type }?.data
     }
 
+    public func fileURLs() -> [URL] {
+        reads += 1; contentReads += 1
+        return contents.filter { $0.type == PasteboardTypes.fileURL }
+            .compactMap { String(data: $0.data, encoding: .utf8).flatMap(URL.init(string:)) }
+            .filter(\.isFileURL)
+    }
+
     @discardableResult
     public func write(_ content: ClipboardContent) -> Int {
         writes.append(content)
@@ -131,6 +145,15 @@ public final class InMemoryPasteboard: PasteboardAccessing {
     /// Another app copied text, optionally with marker types such as `org.nspasteboard.ConcealedType`.
     public func copy(text: String, markers: [String] = []) {
         setContents([(PasteboardTypes.plainText, Data(text.utf8))] + markers.map { ($0, Data()) })
+    }
+
+    /// Finder copied these files (the file names come along as text, as in Finder).
+    public func copy(files: [URL], markers: [String] = []) {
+        setContents(
+            files.map { (PasteboardTypes.fileURL, Data($0.absoluteString.utf8)) }
+                + [(PasteboardTypes.plainText, Data(files.map(\.lastPathComponent).joined(separator: "\r").utf8))]
+                + markers.map { ($0, Data()) }
+        )
     }
 
     /// Another app copied an image.

@@ -17,6 +17,18 @@ public enum ClipboardStatus: Sendable, Equatable {
     case denied
 }
 
+/// The app in front when something was copied.
+public struct FrontmostApp: Sendable, Equatable {
+    public var bundleID: String?
+    /// Display name, e.g. "Safari".
+    public var name: String?
+    public init(bundleID: String?, name: String?) { self.bundleID = bundleID; self.name = name }
+
+    @MainActor public static func current() -> FrontmostApp? {
+        NSWorkspace.shared.frontmostApplication.map { FrontmostApp(bundleID: $0.bundleIdentifier, name: $0.localizedName) }
+    }
+}
+
 /// Recent copied text and images, in memory only. Click to copy again; convert a copied image to WebP.
 @MainActor
 @Observable
@@ -33,7 +45,7 @@ public final class ClipboardModule: NotchModule {
     public let requirements = [
         PermissionRequirement(
             .pasteboard, optional: true,
-            rationale: "Remembers text and images you copy (in memory only) so you can paste them again."
+            rationale: "Keeps recently copied text and images in memory so they can be pasted again."
         ),
     ]
 
@@ -42,6 +54,8 @@ public final class ClipboardModule: NotchModule {
     /// The entry that was just copied back, for a brief confirmation.
     public private(set) var confirmedID: ClipboardEntry.ID?
     public var entries: [ClipboardEntry] { history.entries }
+    /// The most entries kept (the "history size").
+    public var capacity: Int { history.limits.maxEntries }
     /// True when a converter is available (the Convert module is enabled).
     public var canConvert: Bool { context?.services.converter != nil }
 
@@ -49,7 +63,7 @@ public final class ClipboardModule: NotchModule {
     private var context: ModuleContext?
 
     @ObservationIgnored private let pasteboard: any PasteboardAccessing
-    @ObservationIgnored private let frontmostBundleID: @MainActor () -> String?
+    @ObservationIgnored private let frontmostApp: @MainActor () -> FrontmostApp?
     @ObservationIgnored private let now: @MainActor () -> Date
     @ObservationIgnored private let pollInterval: Duration
     @ObservationIgnored private let openPrivacySettings: @MainActor () -> Void
@@ -64,19 +78,19 @@ public final class ClipboardModule: NotchModule {
 
     /// - Parameters:
     ///   - pasteboard: the general pasteboard in the app; a fake or a uniquely named pasteboard in tests.
-    ///   - frontmostBundleID: bundle id of the frontmost app, for the password-manager rule.
+    ///   - frontmostApp: the app in front, for the password-manager rule and the clip's source.
     ///   - now: clock for entry timestamps.
     ///   - pollInterval: how often the change count is checked while monitoring.
     ///   - openPrivacySettings: opens System Settings › Privacy & Security.
     public init(
         pasteboard: any PasteboardAccessing,
-        frontmostBundleID: @escaping @MainActor () -> String? = { NSWorkspace.shared.frontmostApplication?.bundleIdentifier },
+        frontmostApp: @escaping @MainActor () -> FrontmostApp? = { FrontmostApp.current() },
         now: @escaping @MainActor () -> Date = { Date() },
         pollInterval: Duration = .milliseconds(500),
         openPrivacySettings: @escaping @MainActor () -> Void = ClipboardModule.openSystemPrivacySettings
     ) {
         self.pasteboard = pasteboard
-        self.frontmostBundleID = frontmostBundleID
+        self.frontmostApp = frontmostApp
         self.now = now
         self.pollInterval = pollInterval
         self.openPrivacySettings = openPrivacySettings
@@ -86,7 +100,7 @@ public final class ClipboardModule: NotchModule {
 
     private init(fixture entries: [ClipboardEntry], thumbnails: [ClipboardEntry.ID: SendableImage]) {
         pasteboard = InMemoryPasteboard()
-        frontmostBundleID = { nil }
+        frontmostApp = { nil }
         now = { Date() }
         pollInterval = .seconds(3600)
         openPrivacySettings = {}
@@ -246,17 +260,26 @@ public final class ClipboardModule: NotchModule {
             status = .denied
             return
         }
-        switch ClipboardPolicy.evaluate(pasteboard, frontmostBundleID: frontmostBundleID(), limits: history.limits) {
+        let app = frontmostApp()
+        switch ClipboardPolicy.evaluate(pasteboard, frontmostBundleID: app?.bundleID, limits: history.limits) {
         case .skip(let reason):
             lastSkip = reason
+        case .files(let urls):
+            // Finder copies go to the Shelf as references; they never become clipboard entries.
+            if let shelf = context?.services.shelf {
+                lastSkip = nil
+                shelf.add(urls, origin: .clipboard)
+            } else {
+                lastSkip = .unsupported
+            }
         case .record(let content):
             lastSkip = nil
-            record(content)
+            record(content, from: app?.name)
         }
     }
 
-    private func record(_ content: ClipboardContent) {
-        let entry = ClipboardEntry(content: content, copiedAt: now())
+    private func record(_ content: ClipboardContent, from sourceApp: String?) {
+        let entry = ClipboardEntry(content: content, copiedAt: now(), sourceApp: sourceApp)
         var added = false
         Motion.animate(Motion.morph) { added = history.record(entry) }
         guard added else { return }

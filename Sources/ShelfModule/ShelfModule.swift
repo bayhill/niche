@@ -17,6 +17,8 @@ public final class ShelfModule: NotchModule, ShelfAccepting {
 
     /// Newest first.
     public var items: [ShelfItem] { list.items }
+    /// The most items the shelf keeps.
+    public var capacity: Int { list.capacity }
 
     private var list: ShelfList
     private var thumbnailCache: [String: SendableImage] = [:]

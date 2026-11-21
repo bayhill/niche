@@ -245,6 +245,32 @@ private func files(_ env: TestEnvironment, _ names: [String]) throws -> [URL] {
         shelf.stop()
     }
 
+    @Test func kindLabels() {
+        func kind(_ name: String, size: Int64? = 1, origin: ShelfOrigin = .dropped) -> String {
+            ShelfItemKind.of(ShelfItem(path: "/tmp/\(name)", origin: origin, addedAt: .now, size: size)).label
+        }
+        #expect(kind("a.webp", origin: .converted) == "Converted")
+        #expect(ShelfItemKind.of(ShelfItem(path: "/tmp/a.webp", origin: .converted, addedAt: .now, size: 1)).symbol == "sparkles")
+        #expect(kind("a.png") == "Image")
+        #expect(kind("a.png", origin: .clipboard) == "Image")
+        #expect(kind("a.mov") == "Movie")
+        #expect(kind("a.pdf") == "PDF")
+        #expect(kind("a.zip") == "Archive")
+        #expect(kind("a.json") == "Code")
+        #expect(kind("a.txt") == "Text")
+        #expect(kind("Assets", size: nil) == "Folder")
+        #expect(kind("a.unknownext") == "Document")
+        #expect(ShelfItemKind.of(ShelfItem(path: "/tmp/a.png", origin: .dropped, addedAt: .now, size: 1)).fillsPreview)
+        #expect(!ShelfItemKind.of(ShelfItem(path: "/tmp/a.pdf", origin: .dropped, addedAt: .now, size: 1)).fillsPreview)
+    }
+
+    @Test func capacityAndSampleVariety() {
+        #expect(makeShelf().capacity == 50)
+        #expect(makeShelf(capacity: 5).capacity == 5)
+        let labels = Set(ShelfModule.sample().items.map { ShelfItemKind.of($0).label })
+        #expect(labels.isSuperset(of: ["Converted", "PDF", "Image", "Folder", "Code", "Movie"]))
+    }
+
     @Test func clickRevealsInFinder() {
         let revealed = Revealed()
         let shelf = makeShelf(revealed: revealed)
