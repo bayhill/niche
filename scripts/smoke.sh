@@ -41,5 +41,7 @@ capture shelf --force-state expanded --page shelf
 capture clipboard --force-state expanded --page clipboard
 
 echo "==> Log"
-log show --last 3m --predicate 'subsystem == "dev.bayhill.notcher"' --style compact 2>/dev/null | grep -ciE " (error|fault) " | sed 's/^/error or fault lines: /'
+/usr/bin/log show --last 3m --style compact \
+  --predicate 'process == "Notcher" AND subsystem == "dev.bayhill.notcher" AND (messageType == error OR messageType == fault)' 2>/dev/null \
+  | grep -vc '^Timestamp' | sed 's/^/error or fault lines from the app: /'
 echo "Screenshots in $OUT"
