@@ -584,7 +584,7 @@ private let png = TestImage.data(TestImage.solid(width: 4, height: 3))
 /// The real `NSPasteboard` adapter, exercised on a private, uniquely named pasteboard (never the general one).
 @MainActor @Suite struct SystemPasteboardTests {
     @Test func adapterReadsTypesSkipsMarkersAndWrites() throws {
-        let named = NSPasteboard(name: NSPasteboard.Name("dev.bayhill.notcher.tests.\(UUID().uuidString)"))
+        let named = NSPasteboard(name: NSPasteboard.Name("\(Log.subsystem).tests.\(UUID().uuidString)"))
         defer { named.releaseGlobally() }
         #expect(named.name != .general)
         let adapter = SystemPasteboard(named)

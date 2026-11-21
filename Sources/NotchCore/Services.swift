@@ -102,6 +102,8 @@ public final class ModuleContext {
 }
 
 public enum Log {
+    /// The app's bundle identifier, as written in `Resources/Info.plist` (a test keeps the two equal).
+    /// Also the log subsystem and the prefix for anything else that needs a reverse-DNS name.
     public static let subsystem = "dev.bayhill.notcher"
     public static func logger(_ category: String) -> Logger { Logger(subsystem: subsystem, category: category) }
     public static func logger(for module: ModuleID) -> Logger { logger(module.rawValue) }

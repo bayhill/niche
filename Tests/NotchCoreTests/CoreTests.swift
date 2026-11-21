@@ -199,6 +199,16 @@ private func activity(_ id: String, _ p: LiveActivity.Priority, updated: TimeInt
     }
 }
 
+@Suite struct IdentityTests {
+    /// `Log.subsystem` is the Swift-side copy of the bundle identifier; Info.plist is the source the build uses.
+    @Test func subsystemMatchesInfoPlist() throws {
+        let root = URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let data = try Data(contentsOf: root.appending(path: "Resources/Info.plist"))
+        let plist = try #require(try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any])
+        #expect(plist["CFBundleIdentifier"] as? String == Log.subsystem)
+    }
+}
+
 @Suite struct DebugOptionsTests {
     @Test func parses() {
         let o = DebugOptions(arguments: ["--simulate-notch", "220x38", "--force-state", "expanded", "--page", "shelf", "--fps", "--fixtures", "--junk"])

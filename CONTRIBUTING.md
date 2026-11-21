@@ -1,21 +1,16 @@
-# Working in this repository
+# Contributing to Notcher
 
 Notcher is a SwiftPM-only macOS 26 app (Swift 6 language mode, no Xcode project). `scripts/bundle.sh` assembles,
 signs and installs `Notcher.app`; `scripts/run.sh [flags]` restarts it.
 
-## Ownership
+## Layout
 
-| Paths | Owner |
-|---|---|
-| `Package.swift`, `scripts/`, `Resources/`, `Sources/NotchCore`, `Sources/NotchCoreTesting`, `Sources/NotcherApp`, `Tests/NotchCoreTests` | orchestrator (frozen contract `contracts-v1`) |
-| `Sources/NotchUI`, `Sources/NotchPlayground`, `Tests/NotchUITests` | Agent A |
-| `Sources/ImageEngine`, `Sources/ConvertModule`, `Sources/webpify`, their tests | Agent B |
-| `Sources/ShelfModule`, `Sources/ClipboardModule`, their tests | Agent C |
-| `Sources/NowPlayingModule`, `Sources/CalendarModule`, `Vendor/MediaRemoteAdapter`, their tests | Agent D |
-| `Sources/ClaudeAgentsModule`, `Support/ClaudePlugin`, its tests | Agent E |
+`Sources/NotchCore` is the contract and the design kit. `Sources/NotchUI` is the notch window. Each `Sources/*Module`
+target is one feature and depends on `NotchCore` only; modules never import each other and talk through the service
+protocols in `NotchCore`. `Sources/NotcherApp` wires everything together. The README has the full table.
 
-Edit only what you own. If the contract in `NotchCore` is wrong or missing something, say so in your report with the
-exact change you need; do not edit it and do not work around it with a private copy.
+A change to one module should stay inside that module's target and its tests. If the contract in `NotchCore` is
+wrong or missing something, change it there, deliberately, rather than working around it with a private copy.
 
 ## Rules
 
@@ -38,20 +33,21 @@ exact change you need; do not edit it and do not work around it with a private c
    - an initializer taking its dependencies (clock, file roots, process runner, data source protocols) for tests.
    `start` logs `context.log.notice("started")` when ready. `start` must not trigger a system permission prompt unless
    `context.mayPrompt` is true. Settings keys are `SettingsKey("<moduleID>.<name>", default:)`.
-5. **Hero element.** Put `.notchHero(id)` on the one element your live-activity glyph should morph into.
+5. **Hero element.** Put `.notchHero(id)` on the one element the module's live-activity glyph should morph into.
 6. **Swift 6 concurrency, explicit.** No default actor isolation is configured: annotate UI and module types
    `@MainActor`; keep parsing, reducers and engines `nonisolated` and `Sendable`. No `@unchecked Sendable` or
    `nonisolated(unsafe)` without a one-line comment saying why it is safe. Zero warnings.
 7. **No SwiftPM resources** (`resources:` in the manifest, `Bundle.module`). Files the app needs at runtime live in
    `Resources/`, `Support/` or `Vendor/` and are copied into the bundle by `scripts/bundle.sh`; load them via
    `Bundle.main` with an injectable override for tests.
-8. **Never touch the user's real data in tests or while developing**: no writes outside your worktree and temporary
+8. **Never touch the user's real data in tests or while developing**: no writes outside the checkout and temporary
    directories, no writes to the general pasteboard, nothing under `~/.claude`, no changes to system settings,
    no installs (Homebrew, npm, pip). Use `TestEnvironment` from `NotchCoreTesting` for roots and fakes.
 9. **Tests use Swift Testing** (`import Testing`). Put the logic in pure types so it is testable without a GUI.
-   To look at a view, render it off-screen with `ViewSnapshot` from `NotchCoreTesting` and open the PNG;
-   only Agent A puts windows on the real display.
-10. **Dependencies are frozen.** No new packages. Apple frameworks only, plus what `Package.swift` already declares.
+   To look at a view, render it off-screen with `ViewSnapshot` from `NotchCoreTesting` and open the PNG, or run
+   the app or `NotchPlayground` with `--fixtures --force-state …`.
+10. **Few dependencies.** Apple frameworks, plus what `Package.swift` already declares. A new package needs a reason
+    that survives the question "could this be fifty lines of our own code?", and an entry in `THIRD_PARTY_NOTICES.md`.
 
 ## Commands
 

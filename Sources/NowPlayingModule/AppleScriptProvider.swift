@@ -133,7 +133,8 @@ public final class AppleScriptProvider: NowPlayingProvider {
     }
 
     public static let downloadArtwork: @Sendable (URL) async -> SendableImage? = { url in
-        guard let (data, _) = try? await URLSession.shared.data(from: url) else { return nil }
+        // The address comes from Spotify's AppleScript reply; only fetch it over https.
+        guard url.scheme?.lowercased() == "https", let (data, _) = try? await URLSession.shared.data(from: url) else { return nil }
         return ArtworkDecoder.decode(data: data)
     }
 

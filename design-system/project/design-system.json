@@ -19,5 +19,5 @@
   },
   "blobs": {},
   "docs": { "sections": [] },
-  "lastChange": { "by": "bayhill", "at": "2026-11-21T18:26:49Z", "via": "Claude Code", "note": "First version, built from Sources/NotchCore/Design at f6cf57c." }
+  "lastChange": { "by": "bayhill", "at": "2026-11-21T18:26:49Z", "via": "Claude Code", "note": "First version, built from Sources/NotchCore/Design at the commit 'Add app icon and its generator script'." }
 }

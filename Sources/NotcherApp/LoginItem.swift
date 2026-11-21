@@ -6,7 +6,7 @@ import ServiceManagement
 /// per-user LaunchAgent that opens the installed app bundle.
 @MainActor
 enum LoginItem {
-    private static let agentLabel = "dev.bayhill.notcher.login"
+    private static let agentLabel = Log.subsystem + ".login"
     private static var agentURL: URL {
         FileManager.default.homeDirectoryForCurrentUser.appending(path: "Library/LaunchAgents/\(agentLabel).plist")
     }

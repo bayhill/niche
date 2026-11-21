@@ -6,6 +6,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="${1:-$ROOT/build/smoke}"
 APP="$HOME/Applications/Notcher.app"
+BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$ROOT/Resources/Info.plist")"
 mkdir -p "$OUT"
 cd "$ROOT"
 
@@ -42,6 +43,6 @@ capture clipboard --force-state expanded --page clipboard
 
 echo "==> Log"
 /usr/bin/log show --last 3m --style compact \
-  --predicate 'process == "Notcher" AND subsystem == "dev.bayhill.notcher" AND (messageType == error OR messageType == fault)' 2>/dev/null \
+  --predicate "process == \"Notcher\" AND subsystem == \"$BUNDLE_ID\" AND (messageType == error OR messageType == fault)" 2>/dev/null \
   | grep -vc '^Timestamp' | sed 's/^/error or fault lines from the app: /'
 echo "Screenshots in $OUT"

@@ -1,5 +1,5 @@
 // swift-tools-version: 6.2
-// FROZEN after contracts-v1. Only the orchestrator edits this file.
+// One package, one target per layer or module. Modules depend on NotchCore only and never on each other.
 import PackageDescription
 
 let swift6: [SwiftSetting] = [.swiftLanguageMode(.v6)]
@@ -23,22 +23,22 @@ let package = Package(
         .package(url: "https://github.com/SDWebImage/libwebp-Xcode.git", .upToNextMinor(from: "1.6.0")),
     ],
     targets: [
-        // Contracts (orchestrator)
+        // Shared contract and design kit
         .target(name: "NotchCore", swiftSettings: swift6),
         .target(name: "NotchCoreTesting", dependencies: ["NotchCore"], swiftSettings: swift6),
         .testTarget(name: "NotchCoreTests", dependencies: ["NotchCore", "NotchCoreTesting"], swiftSettings: swift6),
 
-        // Agent A
+        // The notch window layer
         .target(name: "NotchUI", dependencies: ["NotchCore"], swiftSettings: swift6),
         .testTarget(name: "NotchUITests", dependencies: ["NotchUI", "NotchCore", "NotchCoreTesting"], swiftSettings: swift6),
         .executableTarget(name: "NotchPlayground", dependencies: ["NotchUI", "NotchCore", "NotchCoreTesting"], swiftSettings: swift6),
 
-        // Agent B
+        // WebP engine and its command-line tool
         .target(name: "ImageEngine", dependencies: [.product(name: "libwebp", package: "libwebp-Xcode")], swiftSettings: swift6),
         .testTarget(name: "ImageEngineTests", dependencies: ["ImageEngine"], swiftSettings: swift6),
         .executableTarget(name: "webpify", dependencies: ["ImageEngine", .product(name: "libwebp", package: "libwebp-Xcode")], swiftSettings: swift6),
 
-        // Composition root (orchestrator)
+        // The app: composition root
         .executableTarget(
             name: "NotcherApp",
             dependencies: [
@@ -48,10 +48,10 @@ let package = Package(
             swiftSettings: swift6
         ),
     ]
-    + module("ConvertModule", deps: ["ImageEngine"])   // Agent B
-    + module("ShelfModule")                            // Agent C
-    + module("ClipboardModule")                        // Agent C
-    + module("NowPlayingModule")                       // Agent D
-    + module("CalendarModule")                         // Agent D
-    + module("ClaudeAgentsModule")                     // Agent E
+    + module("ConvertModule", deps: ["ImageEngine"])
+    + module("ShelfModule")
+    + module("ClipboardModule")
+    + module("NowPlayingModule")
+    + module("CalendarModule")
+    + module("ClaudeAgentsModule")
 )

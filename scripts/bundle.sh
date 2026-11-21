@@ -3,14 +3,17 @@
 #   scripts/bundle.sh            release build, install to ~/Applications
 #   CONFIG=debug scripts/bundle.sh
 #   INSTALL=0 scripts/bundle.sh  build/Notcher.app only
+#   NOTCHER_SIGN_IDENTITY="My Identity" scripts/bundle.sh
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CONFIG="${CONFIG:-release}"
 INSTALL="${INSTALL:-1}"
 APP_NAME="Notcher"
-BUNDLE_ID="dev.bayhill.notcher"
-IDENTITY="Notcher Local Signing"
+# The bundle identifier has one source: Resources/Info.plist.
+BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$ROOT/Resources/Info.plist")"
+# Code-signing identity. Override with NOTCHER_SIGN_IDENTITY; falls back to ad-hoc signing when it is not in the keychain.
+IDENTITY="${NOTCHER_SIGN_IDENTITY:-Notcher Local Signing}"
 APP="$ROOT/build/$APP_NAME.app"
 INSTALL_DIR="$HOME/Applications"
 
@@ -41,6 +44,9 @@ if [ -d Resources/AppIcon.icon ]; then
 elif [ -f Resources/AppIcon.icns ]; then
   cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 fi
+
+# Licence and third-party notices travel with the binary.
+cp LICENSE THIRD_PARTY_NOTICES.md "$APP/Contents/Resources/"
 
 # Claude Code plugin (installed into the user's Claude config only on explicit opt-in inside the app).
 if [ -n "$(ls -A Support/ClaudePlugin 2>/dev/null)" ]; then

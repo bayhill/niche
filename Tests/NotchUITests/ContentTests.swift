@@ -131,7 +131,7 @@ struct DropItemTests {
 
     /// Uses a private named pasteboard, never the general one.
     @Test func readsFileURLsAndTextFromAPasteboard() throws {
-        let pb = NSPasteboard(name: NSPasteboard.Name("dev.bayhill.notcher.tests.\(UUID().uuidString)"))
+        let pb = NSPasteboard(name: NSPasteboard.Name("\(Log.subsystem).tests.\(UUID().uuidString)"))
         defer { pb.releaseGlobally() }
         pb.clearContents()
         pb.writeObjects([file as NSURL])

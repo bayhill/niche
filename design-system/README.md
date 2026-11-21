@@ -1,15 +1,14 @@
 # Notcher design system
 
 A reference copy of the Notcher design system: tokens, usage rules, web renditions of the design kit, and layout
-explorations for the modules. It is also published as a browsable page at
-(link removed) (private to its owner unless shared).
+explorations for the modules.
 
 ## What is authoritative
 
 `Sources/NotchCore/Design` is the source of truth. This folder describes it and explores on top of it; it does not
 override it. If the two disagree, the Swift code wins and this folder is out of date.
 
-- **Mirrors the code** (read at commit `f6cf57c`): every value in `project/tokens.json` whose usage note names a
+- **Mirrors the code** (read at the commit "Add app icon and its generator script"): every value in `project/tokens.json` whose usage note names a
   `Tokens.…` or `PanelLayout.…` symbol, the motion table in `project/motion.md`, and the kit components.
 - **Proposals, not in the code**: the Now Playing, Convert and Clipboard layouts, the ambient-artwork variant, the wing
   rendering, the top band of page icons, and the dashboard slot each module sits in. Treat these as a design to build
@@ -61,5 +60,5 @@ Then open http://localhost:8765/. `tools/gen.py` writes `project/components/**` 
 `tools/bundle_tail.js`, `tools/index.d.ts` and the markup in the script itself; edit those, not the generated files.
 `project/tokens.json` and the three Markdown sections are edited by hand.
 
-The published page is updated separately, by publishing the files under `project/` to the artifact above. The app icon
+The published page is updated separately, by publishing the files under `project/` to its own page, which is private to its owner. The app icon
 shown there is an upload exported from `Resources/AppIcon.icns` and is not duplicated here.
