@@ -199,6 +199,22 @@ private func activity(_ id: String, _ p: LiveActivity.Priority, updated: TimeInt
     }
 }
 
+@MainActor @Suite struct FileDragTests {
+    @Test func providerCarriesTheFilesOwnName() throws {
+        let env = try TestEnvironment()
+        defer { env.cleanUp() }
+        let url = try TestImage.write(TestImage.solid(), to: env.root.appending(path: "Shot 2026-11-21 at 19.13.31.png"))
+        let provider = FileDrag.provider(for: url)
+        #expect(provider.suggestedName == "Shot 2026-11-21 at 19.13.31.png")
+        #expect(provider.registeredTypeIdentifiers.contains("public.png"))
+    }
+
+    @Test func missingFileStillGetsAName() {
+        let provider = FileDrag.provider(for: URL(fileURLWithPath: "/nonexistent/report.pdf"))
+        #expect(provider.suggestedName == "report.pdf")
+    }
+}
+
 @Suite struct IdentityTests {
     /// `Log.subsystem` is the Swift-side copy of the bundle identifier; Info.plist is the source the build uses.
     @Test func subsystemMatchesInfoPlist() throws {

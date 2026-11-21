@@ -259,9 +259,20 @@ public extension View {
     /// One view drags one file: only the first URL is offered.
     @ViewBuilder func fileDragSource(_ urls: [URL]) -> some View {
         if let first = urls.first {
-            onDrag { NSItemProvider(contentsOf: first) ?? NSItemProvider() }
+            onDrag { FileDrag.provider(for: first) }
         } else {
             self
         }
+    }
+}
+
+public enum FileDrag {
+    /// The item provider for dragging a file out. The receiver gets a copy of the file's contents, so the original
+    /// is never moved. `NSItemProvider(contentsOf:)` leaves `suggestedName` empty, and Finder then names the copy
+    /// after its type ("PNG image.png"); carrying the file's own name keeps it.
+    public static func provider(for url: URL) -> NSItemProvider {
+        let provider = NSItemProvider(contentsOf: url) ?? NSItemProvider()
+        provider.suggestedName = url.lastPathComponent
+        return provider
     }
 }
