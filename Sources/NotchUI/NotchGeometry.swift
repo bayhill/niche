@@ -13,9 +13,8 @@ public struct NotchLayout: Sendable, Equatable {
     public var shapeRect: CGRect
     /// The visible shape in global coordinates.
     public var visibleRect: CGRect
-    /// Where the window takes mouse events (global). Everything else passes through to the apps and menu bar below.
-    /// Activity wings are visual only (the notch itself is interactive), and an invisible closed virtual notch on a
-    /// notchless display takes nothing: `.null`.
+    /// Where the window takes mouse events (global): exactly the visible shape. Everything else passes through to the
+    /// apps and menu bar below. An invisible closed virtual notch on a notchless display takes nothing: `.null`.
     public var hitRect: CGRect
     /// 0 hides the surface entirely (the closed state of a virtual notch on a notchless display).
     public var surfaceOpacity: Double
@@ -148,22 +147,23 @@ public enum NotchGeometry {
         // Without a hardware notch the closed pill would sit over real menu-bar items, so it is not drawn and claims
         // nothing; the notch there opens by hotkey, the app's menu-bar item or a drag. `--simulate-notch` keeps it.
         let passive = state == .closed && !metrics.hasNotch && simulatedNotch == nil
-        let hit: CGRect = switch state {
-        case .closed: passive ? .null : notch
-        case .activity: notch
-        case .hover:
-            // The swell around the notch (hint included), never the wings beside it.
-            {
-                let g = hoverGrowth(hint: hoverHint)
-                return CGRect(x: notch.midX - (notch.width + g.width) / 2, y: top - notch.height - g.height,
-                              width: notch.width + g.width, height: notch.height + g.height)
-            }()
-        case .drop, .expanded: visible
-        }
+        // Whatever is drawn takes the pointer, and nothing else: the whole bar with both wings at their target
+        // (clamped, possibly unequal) widths, the swollen bar with its hint line, or the open panel. The right wing is
+        // already clamped clear of status items; a menu title under the left wing is covered by it anyway.
+        let hit: CGRect = passive ? .null : visible
         return NotchLayout(
             state: state, windowFrame: window, notchRect: notch, shapeRect: shape, visibleRect: visible, hitRect: hit,
             surfaceOpacity: passive ? 0 : 1, wings: wings, hoverHint: hoverHint, topRadius: r.top, bottomRadius: r.bottom, glassAmount: state.isOpen ? 1 : 0
         )
+    }
+
+    /// The enter/exit event, if any, for a pointer at `point` given whether it was inside before. Evaluated against
+    /// the target layout, so a wing growing under a resting pointer starts the dwell and one shrinking away from it
+    /// ends hover at once.
+    public static func pointerEvent(at point: CGPoint, layout: NotchLayout, wasInside: Bool) -> NotchEvent? {
+        let inside = layout.hits(point)
+        guard inside != wasInside else { return nil }
+        return inside ? .pointerEntered : .pointerExited
     }
 
     /// Whether a file drag at `point` should show (or keep showing) the drop target.

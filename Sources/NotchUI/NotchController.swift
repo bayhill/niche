@@ -297,7 +297,9 @@ public final class NotchController: NotchControlling {
         guard let panel else { return }
         let inside = model.layout.hits(location)
         if panel.ignoresMouseEvents == inside { panel.ignoresMouseEvents = !inside }
-        if !pinned, inside != machine.pointerInside { send(inside ? .pointerEntered : .pointerExited) }
+        if !pinned, let event = NotchGeometry.pointerEvent(at: location, layout: model.layout, wasInside: machine.pointerInside) {
+            send(event)
+        }
     }
 
     /// A module text field may have made the panel key. Hand key focus back to the frontmost app's window
@@ -450,6 +452,8 @@ public final class NotchController: NotchControlling {
                 model.activity = chosen
                 model.layout = layout
             }
+            // The bar grew under, or shrank away from, a resting pointer.
+            updatePointer(NSEvent.mouseLocation)
         }
         if !pinned { send(.activityChanged(chosen != nil)) }
 
@@ -472,6 +476,7 @@ public final class NotchController: NotchControlling {
         guard animate else { return }
         let layout = currentLayout()
         Motion.animate(Motion.morph) { model.layout = layout }
+        updatePointer(NSEvent.mouseLocation)
     }
 
     private func refreshFullscreen() {

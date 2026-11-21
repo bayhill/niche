@@ -71,8 +71,8 @@ struct GeometryTests {
         #expect((a.bodyWidth - f.notch.width) / 2 == PanelLayout.wingWidth)
         #expect(a.visibleRect.minX == f.notch.minX - PanelLayout.wingWidth - Tokens.Radius.notchClosedTop)
         #expect(a.visibleRect.maxX == f.notch.maxX + PanelLayout.wingWidth + Tokens.Radius.notchClosedTop)
-        // The wings are visual only: just the notch takes the pointer, on every kind of display.
-        #expect(a.hitRect == f.notch)
+        // The whole drawn bar takes the pointer, wings included, on every kind of display.
+        #expect(a.hitRect == a.visibleRect)
         #expect(a.surfaceOpacity == 1)
     }
 
@@ -117,16 +117,9 @@ struct GeometryTests {
             let l = layout(f, state)
             switch state {
             case .closed: #expect(l.hitRect == (f.claimsClosed ? f.notch : .null))
-            case .activity: #expect(l.hitRect == f.notch)
-            case .hover:
-                // The swell around the notch, hint included; never the wings beside it.
-                let g = PanelLayout.hoverGrowth
-                #expect(l.hitRect == CGRect(
-                    x: f.notch.midX - (f.notch.width + g.width) / 2, y: f.notch.maxY - f.notch.height - g.height,
-                    width: f.notch.width + g.width, height: f.notch.height + g.height
-                ))
-                #expect(layout(f, .hover, activity: false).hitRect == layout(f, .hover, activity: false).visibleRect)
-            case .drop, .expanded: #expect(l.hitRect == l.visibleRect)
+            case .activity, .hover, .drop, .expanded:
+                // Exactly what is drawn: the whole bar, the swollen bar with its hint line, or the panel.
+                #expect(l.hitRect == l.visibleRect)
             }
             guard !l.hitRect.isNull else { continue }
             let r = l.hitRect
@@ -150,11 +143,11 @@ struct GeometryTests {
         // Status items right next to the notch.
         #expect(!closed.hits(CGPoint(x: m.auxLeft!.maxX - 1, y: y)))
         #expect(!closed.hits(CGPoint(x: m.auxRight!.minX + 1, y: y)))
-        // With an activity showing, the wings are drawn over the menu bar but clicks there pass through.
-        #expect(activity.visibleRect.contains(CGPoint(x: 790 - 30, y: y)))
-        #expect(!activity.hits(CGPoint(x: 790 - 30, y: y)))
-        #expect(!activity.hits(CGPoint(x: 1010 + 30, y: y)))
-        #expect(!activity.hits(CGPoint(x: 790 - 0.5, y: y)))
+        // With an activity showing, the drawn wings take the pointer and nothing past them does.
+        #expect(activity.hits(CGPoint(x: 790 - 30, y: y)))
+        #expect(activity.hits(CGPoint(x: 1010 + 30, y: y)))
+        #expect(!activity.hits(CGPoint(x: activity.visibleRect.minX - 0.5, y: y)))
+        #expect(!activity.hits(CGPoint(x: activity.visibleRect.maxX + 0.5, y: y)))
         #expect(activity.hits(CGPoint(x: 900, y: y)))
         // App menus at the far left and right are never covered by any state.
         for state in NotchState.allCases {
@@ -277,7 +270,7 @@ struct WingAndHoverTests {
                 #expect(l.visibleRect.minX + l.topRadius + e.left == notch.minX)
                 #expect(l.visibleRect.maxX - l.topRadius - e.right == notch.maxX)
                 #expect(l.shapeRect.minX + l.windowFrame.minX == l.visibleRect.minX)
-                #expect(l.hitRect == (state == .activity ? notch : l.hitRect))
+                #expect(l.hitRect == l.visibleRect)
             }
         }
         let lopsided = wings(200, 0)
@@ -285,12 +278,99 @@ struct WingAndHoverTests {
         #expect(wings(0, 0).notchOffsetInShape == 0)
     }
 
-    @Test func wideWingsNeverTakeClicks() {
-        let l = wings(400, 400)
-        #expect(l.hitRect == notch)
-        #expect(!l.hits(CGPoint(x: notch.minX - 200, y: notch.midY)))
-        #expect(!l.hits(CGPoint(x: notch.maxX + 200, y: notch.midY)))
-        #expect(l.hits(CGPoint(x: notch.midX, y: notch.midY)))
+    @Test func theHitRectIsTheWholeBarForSymmetricAsymmetricAndClampedWings() {
+        let room = StatusItemClearance.trailingRoom(notch: notch, menuBar: menuBar, statusItems: [CGRect(x: 1139, y: 1130, width: 24, height: 39)])!
+        for l in [wings(0, 0), wings(120, 120), wings(250, 40), wings(30, 250), wings(1000, 1000), wings(300, 300, status: room), wings(0, 300, status: 5)] {
+            #expect(l.hitRect == l.visibleRect)
+            let e = NotchGeometry.extents(.activity, notch: notch.size, hasActivity: true, wings: l.wings)
+            // Both wing tips, including the ears, and nothing a point beyond.
+            #expect(l.hits(CGPoint(x: notch.minX - e.left, y: notch.midY)))
+            #expect(l.hits(CGPoint(x: notch.maxX + e.right, y: notch.midY)))
+            #expect(!l.hits(CGPoint(x: l.visibleRect.minX - 1, y: notch.midY)))
+            #expect(!l.hits(CGPoint(x: l.visibleRect.maxX + 1, y: notch.midY)))
+            #expect(!l.hits(CGPoint(x: notch.midX, y: notch.minY - 1)))
+        }
+        // The clamped right wing stays short of the first status item.
+        #expect(wings(300, 300, status: room).hitRect.maxX + PanelLayout.wingClearance <= 1139)
+    }
+
+    @Test func dwellingOnAWingHoversAndAClickThereExpands() {
+        let activity = wings(200, 100)
+        let onWing = CGPoint(x: notch.minX - 120, y: notch.midY)
+        var machine = NotchStateMachine(state: .activity, hasActivity: true)
+        let t0 = ContinuousClock.now
+        let enter = NotchGeometry.pointerEvent(at: onWing, layout: activity, wasInside: machine.pointerInside)
+        #expect(enter == .pointerEntered)
+        machine.send(enter!, now: t0)
+        machine.advance(to: t0 + NotchStateMachine.dwellDelay)
+        #expect(machine.state == .hover)
+        // In hover the pointer is still on the bar: no exit.
+        let hover = wings(200, 100, state: .hover)
+        #expect(NotchGeometry.pointerEvent(at: onWing, layout: hover, wasInside: true) == nil)
+        machine.send(.click, now: t0 + .seconds(1))
+        #expect(machine.state == .expanded)
+
+        var direct = NotchStateMachine(state: .activity, hasActivity: true)
+        direct.send(.pointerEntered, now: t0)
+        direct.send(.click, now: t0)
+        #expect(direct.state == .expanded)
+    }
+
+    @Test func crossingFromTheNotchOntoAWingDoesNotLeaveHover() {
+        let hover = wings(150, 150, state: .hover)
+        var inside = true
+        // Sweep from the notch across the left wing to its tip, then back across to the right wing tip.
+        let sweep = Array(stride(from: notch.midX, through: hover.visibleRect.minX, by: -2))
+            + Array(stride(from: hover.visibleRect.minX, through: hover.visibleRect.maxX, by: 2))
+        for x in sweep {
+            if let event = NotchGeometry.pointerEvent(at: CGPoint(x: x, y: notch.midY), layout: hover, wasInside: inside) {
+                Issue.record("unexpected \(event) at x \(x)")
+                inside.toggle()
+            }
+        }
+        // The hint line below the notch, and below the wings, is part of the swollen bar too.
+        #expect(hover.hits(CGPoint(x: notch.midX, y: notch.minY - 12)))
+        #expect(hover.hits(CGPoint(x: notch.minX - 100, y: notch.minY - 12)))
+    }
+
+    @Test func aWingShrinkingFromUnderARestingPointerEndsHover() {
+        let pointer = CGPoint(x: notch.minX - 150, y: notch.midY)
+        var machine = NotchStateMachine(state: .activity, hasActivity: true)
+        let t0 = ContinuousClock.now
+        machine.send(NotchGeometry.pointerEvent(at: pointer, layout: wings(250, 40), wasInside: false)!, now: t0)
+        machine.advance(to: t0 + NotchStateMachine.dwellDelay)
+        #expect(machine.state == .hover)
+        // Next track: a short title. The target layout no longer covers the pointer.
+        let shrunk = wings(20, 40, state: .hover)
+        let exit = NotchGeometry.pointerEvent(at: pointer, layout: shrunk, wasInside: machine.pointerInside)
+        #expect(exit == .pointerExited)
+        machine.send(exit!, now: t0 + .seconds(1))
+        #expect(machine.state == .activity)
+        // And a wing growing under a resting pointer starts the dwell.
+        let grown = NotchGeometry.pointerEvent(at: pointer, layout: wings(250, 40), wasInside: false)
+        #expect(grown == .pointerEntered)
+        #expect(machine.send(grown!, now: t0 + .seconds(2)) == [.schedule(.dwell, at: t0 + .seconds(2) + NotchStateMachine.dwellDelay)])
+    }
+
+    @Test func withoutAnActivityOnlyTheNotchIsInvolved() {
+        let closed = NotchGeometry.layout(metrics: m, state: .closed)
+        #expect(closed.hitRect == notch)
+        let hover = NotchGeometry.layout(metrics: m, state: .hover)
+        #expect(hover.hitRect == hover.visibleRect)
+        #expect(hover.visibleRect.width == notch.width + PanelLayout.hoverGrowth.width)
+        #expect(!hover.hits(CGPoint(x: notch.minX - 20, y: notch.midY)))
+    }
+
+    @Test func notchlessDisplaysTakeThePointerOnlyWhenABarIsDrawn() {
+        let ext = ScreenMetrics.external1080p
+        let virtual = ext.effectiveNotchRect()
+        let point = CGPoint(x: virtual.minX - 60, y: virtual.midY)
+        let closed = NotchGeometry.layout(metrics: ext, state: .closed)
+        #expect(closed.hitRect.isNull && !closed.hits(CGPoint(x: virtual.midX, y: virtual.midY)))
+        let bar = NotchGeometry.layout(metrics: ext, state: .activity, hasActivity: true, wings: WingRequest(leadingTextWidth: 100))
+        #expect(bar.hitRect == bar.visibleRect)
+        #expect(bar.hits(point))
+        #expect(NotchGeometry.pointerEvent(at: point, layout: bar, wasInside: false) == .pointerEntered)
     }
 
     // MARK: Status items
@@ -406,12 +486,13 @@ struct WingAndHoverTests {
         // The hint is centred under the hardware notch, not under the lopsided bar.
         #expect(hover.visibleRect.midX + hover.notchOffsetInShape == notch.midX)
         #expect(hover.notchOffsetInShape > 0)
-        // Clickable: the swell around the notch. Not: the wings, the area below them, the menu bar beyond.
+        // Clickable: the whole swollen bar, wings and hint line included; nothing past it.
+        #expect(hover.hitRect == hover.visibleRect)
         #expect(hover.hits(CGPoint(x: notch.midX, y: notch.minY - 12)))
-        #expect(hover.hits(CGPoint(x: notch.minX - PanelLayout.hoverGrowth.width / 2, y: notch.midY)))
-        #expect(!hover.hits(CGPoint(x: notch.minX - 20, y: notch.midY)))
-        #expect(!hover.hits(CGPoint(x: notch.minX - 60, y: notch.minY - 12)))
+        #expect(hover.hits(CGPoint(x: notch.minX - 20, y: notch.midY)))
+        #expect(hover.hits(CGPoint(x: notch.minX - 60, y: notch.minY - 12)))
         #expect(!hover.hits(CGPoint(x: hover.visibleRect.maxX + 5, y: notch.midY)))
+        #expect(!hover.hits(CGPoint(x: hover.visibleRect.minX - 5, y: notch.midY)))
     }
 
     @Test func hintVisibilityRule() {
