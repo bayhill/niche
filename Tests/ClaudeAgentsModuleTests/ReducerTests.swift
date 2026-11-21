@@ -105,6 +105,31 @@ import Testing
     }
 }
 
+@Suite struct ReducerPruningTests {
+    let t0 = Fixture.t0
+    func at(_ s: TimeInterval) -> Date { t0.addingTimeInterval(s) }
+
+    @Test func mapsStayBounded() {
+        var r = SessionReducer()
+        r.applyRegistry(RegistrySnapshot(records: [], available: true), now: at(0))
+        for i in 0..<500 {
+            r.apply(Fixture.event(.userPromptSubmit, "hook-only-\(i)", at: Double(i)))
+            r.apply(Fixture.event(.sessionEnd(reason: "other"), "ended-\(i)", at: Double(i)))
+            r.applyRegistry(RegistrySnapshot(records: [Fixture.record("seen-\(i)", status: "busy", at: Double(i))], available: true), now: at(Double(i)))
+        }
+        r.applyRegistry(RegistrySnapshot(records: [Fixture.record("live", status: "idle", at: 0)], available: true), now: at(500))
+        r.apply(Fixture.event(.userPromptSubmit, "fresh", at: 600))
+        r.prune(now: at(600))
+        #expect(r.memoryFootprint.hooks == 501, "nothing is past its limit yet")
+        let later = 500 + SessionReducer.memory + SessionReducer.Config().attentionGrace + 1
+        r.applyRegistry(RegistrySnapshot(records: [Fixture.record("live", status: "idle", at: 0)], available: true), now: at(later))
+        r.prune(now: at(later))
+        let f = r.memoryFootprint
+        #expect(f.registry == 1 && f.seen == 1 && f.ended == 0 && f.hooks == 0)
+        #expect(r.sessions(now: at(later)).map(\.id) == ["live"])
+    }
+}
+
 @Suite struct ReducerMergeTests {
     let t0 = Fixture.t0
     func at(_ s: TimeInterval) -> Date { t0.addingTimeInterval(s) }
@@ -262,22 +287,22 @@ import Testing
             session("ask", .needsInput(detail: nil), since: -60),
             session("perm", .needsPermission(detail: "Bash"), since: -20),
         ]
-        let c = SessionCardContent.make(sessions: all, hookStatus: .installed)
+        let c = SessionCardContent.make(sessions: all, alerts: .on)
         #expect(c.rows.map(\.id) == ["perm", "ask"], "needs the user first, newest change first")
         #expect(c.hiddenCount == 3)
-        let calm = SessionCardContent.make(sessions: Array(all.prefix(3)), hookStatus: .installed)
+        let calm = SessionCardContent.make(sessions: Array(all.prefix(3)), alerts: .on)
         #expect(calm.rows.map(\.id) == ["work", "done"], "then working, then done/idle")
         #expect(calm.hiddenCount == 1)
-        let two = SessionCardContent.make(sessions: Array(all.prefix(2)), hookStatus: .installed)
+        let two = SessionCardContent.make(sessions: Array(all.prefix(2)), alerts: .on)
         #expect(two.hiddenCount == 0 && two.rows.count == 2)
     }
 
     @Test func enableAlertsOnlyWhenOffAndSomethingRuns() {
         let one = [session("work", .working, since: 0)]
-        #expect(SessionCardContent.make(sessions: one, hookStatus: .notInstalled).showsEnableAlerts)
-        #expect(SessionCardContent.make(sessions: one, hookStatus: .cliNotFound).showsEnableAlerts)
-        #expect(!SessionCardContent.make(sessions: one, hookStatus: .installed).showsEnableAlerts)
-        #expect(!SessionCardContent.make(sessions: [], hookStatus: .notInstalled).showsEnableAlerts)
-        #expect(SessionCardContent.make(sessions: [], hookStatus: .notInstalled).rows.isEmpty)
+        #expect(SessionCardContent.make(sessions: one, alerts: .off).showsEnableAlerts)
+        #expect(SessionCardContent.make(sessions: one, alerts: .unavailable).showsEnableAlerts && SessionCardContent.make(sessions: one, alerts: .offStillRegistered).showsEnableAlerts)
+        #expect(!SessionCardContent.make(sessions: one, alerts: .on).showsEnableAlerts)
+        #expect(!SessionCardContent.make(sessions: [], alerts: .off).showsEnableAlerts)
+        #expect(SessionCardContent.make(sessions: [], alerts: .off).rows.isEmpty)
     }
 }

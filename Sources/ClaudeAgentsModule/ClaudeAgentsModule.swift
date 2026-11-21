@@ -30,6 +30,18 @@ public final class ClaudeAgentsModule: NotchModule {
     public private(set) var lastResult: InstallResult?
     public private(set) var isChangingHooks = false
 
+    /// Set only by a successful `installHooks()` and cleared first by `uninstallHooks()`. The spool folder that the
+    /// bridge writes to exists only while this is true and the module is running.
+    public static let alertsEnabled = SettingsKey<Bool>("claudeAgents.alertsEnabled", default: false)
+
+    /// The honest state of alerts: the user's choice combined with what Claude Code actually has registered.
+    public var alertsState: AlertsState {
+        AlertsState(enabled: settings?.get(Self.alertsEnabled) ?? sampleAlertsOn, hookStatus: hookStatus)
+    }
+
+    /// False until `start` has supplied the settings store; Install needs it to record the choice.
+    public var canChangeAlerts: Bool { settings != nil && !isSample }
+
     /// The card shows at most this many rows; the rest are counted as "+N".
     public static let visibleLimit = ClaudeAgentsModuleLayout.visibleRows
 
@@ -51,6 +63,9 @@ public final class ClaudeAgentsModule: NotchModule {
     @ObservationIgnored private var refreshAgain = false
     @ObservationIgnored private var running = false
     @ObservationIgnored private weak var services: AppServices?
+    @ObservationIgnored private var settings: SettingsStore?
+    @ObservationIgnored private var spoolDirectory: URL?
+    @ObservationIgnored private var sampleAlertsOn = false
 
     /// - Parameters:
     ///   - directories: filesystem roots; `nil` uses the ones handed to `start` (the app's).
@@ -79,6 +94,7 @@ public final class ClaudeAgentsModule: NotchModule {
         sessions = SessionReducer.ordered(sampleSessions)
         liveActivity = ClaudeActivity.make(for: sessions, now: now)
         self.hookStatus = hookStatus
+        sampleAlertsOn = hookStatus == .installed
         plan = SampleHookInstaller().plan()
     }
 
@@ -109,13 +125,17 @@ public final class ClaudeAgentsModule: NotchModule {
         guard !running else { return }
         running = true
         services = context.services
+        settings = context.settings
         if isSample {
             context.log.notice("started")
             return
         }
         let dirs = directories ?? context.directories
         registryReader = RegistryReader(directory: dirs.home.appending(path: ".claude/sessions", directoryHint: .isDirectory), inspector: inspector)
-        spoolReader = SpoolReader(directory: dirs.appSupport.appending(path: "claude-events", directoryHint: .isDirectory))
+        let spool = dirs.appSupport.appending(path: "claude-events", directoryHint: .isDirectory)
+        spoolDirectory = spool
+        spoolReader = SpoolReader(directory: spool)
+        reducer = SessionReducer()
         if installer == nil {
             installer = HookInstaller(
                 paths: .standard(directories: dirs, bundledPlugin: bundledPlugin, searchPath: ProcessInfo.processInfo.environment["PATH"]),
@@ -126,6 +146,8 @@ public final class ClaudeAgentsModule: NotchModule {
         if let installer {
             hookStatus = await Task.detached { installer.prepare(); return installer.status() }.value
         }
+        guard running else { return }  // stopped while starting
+        syncSpool()
         let interval = pollInterval
         loop = Task { [weak self] in
             var tick = 0
@@ -141,12 +163,26 @@ public final class ClaudeAgentsModule: NotchModule {
         context.log.notice("started")
     }
 
+    /// Stops polling and removes the spool folder, so the bridge collects nothing while the module is off or the
+    /// app has quit (the app calls `stop()` at termination). `start` recreates it when alerts are enabled.
     public func stop() {
         loop?.cancel()
         loop = nil
         for source in watchers.values { source.cancel() }
         watchers = [:]
         running = false
+        syncSpool()
+    }
+
+    /// The spool exists exactly while the module runs with alerts enabled.
+    private func syncSpool() {
+        guard let spool = spoolDirectory else { return }
+        let fm = FileManager.default
+        if running, settings?.get(Self.alertsEnabled) == true {
+            try? fm.createDirectory(at: spool, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        } else if fm.fileExists(atPath: spool.path) {
+            try? fm.removeItem(at: spool)
+        }
     }
 
     // MARK: Refresh
@@ -160,8 +196,9 @@ public final class ClaudeAgentsModule: NotchModule {
             refreshAgain = false
             let now = clock()
             let (snapshot, events) = await Task.detached { (registryReader.read(), spoolReader.drain(now: now)) }.value
-            reducer.applyRegistry(snapshot)
+            reducer.applyRegistry(snapshot, now: now)
             for event in events { reducer.apply(event) }
+            reducer.prune(now: now)
             publish(now: clock())
         } while refreshAgain
         refreshing = false
@@ -179,6 +216,7 @@ public final class ClaudeAgentsModule: NotchModule {
         Task {
             let status = await Task.detached { installer.status() }.value
             if status != hookStatus { hookStatus = status }
+            syncSpool()
         }
     }
 
@@ -226,25 +264,36 @@ public final class ClaudeAgentsModule: NotchModule {
         }
     }
 
+    /// Registers the plugin with Claude Code; only on success are alerts switched on (and the spool created).
     public func installHooks() async {
-        guard let installer, !isChangingHooks else { return }
+        guard let installer, let settings, !isChangingHooks else { return }
         isChangingHooks = true
         let result = await installer.install()
         lastResult = result
-        hookStatus = await Task.detached { installer.status() }.value
-        plan = await Task.detached { installer.plan() }.value
+        if result.succeeded { settings.set(Self.alertsEnabled, true) }
+        await reloadStatus(installer)
+        syncSpool()
         isChangingHooks = false
         armWatchers()
     }
 
+    /// Switches alerts off first (the spool goes at once, so nothing more is collected), then asks Claude Code to
+    /// forget the plugin. If that fails, alerts stay off and `alertsState` reports `.offStillRegistered`.
     public func uninstallHooks() async {
         guard let installer, !isChangingHooks else { return }
         isChangingHooks = true
+        settings?.set(Self.alertsEnabled, false)
+        syncSpool()
         let result = await installer.uninstall()
         lastResult = result
-        hookStatus = await Task.detached { installer.status() }.value
-        plan = await Task.detached { installer.plan() }.value
+        await reloadStatus(installer)
         isChangingHooks = false
+    }
+
+    private func reloadStatus(_ installer: any HookInstalling) async {
+        let (status, plan) = await Task.detached { (installer.status(), installer.plan()) }.value
+        hookStatus = status
+        self.plan = plan
     }
 
     // MARK: UI
@@ -274,8 +323,8 @@ struct SampleHookInstaller: HookInstalling {
             installSteps: [
                 "Copy the plugin from the app to \(root)",
                 "Back up /Users/dev/.claude/settings.json to /Users/dev/Library/Application Support/Notcher/claude-settings-backups/settings-<timestamp>.json",
-                "Run the two commands below",
-                "Create /Users/dev/Library/Application Support/Notcher/claude-events",
+                "Run the two commands below (if the second fails, the first is undone)",
+                "While Notcher runs with alerts on, keep /Users/dev/Library/Application Support/Notcher/claude-events for the plugin to drop events in",
             ],
             uninstallSteps: [],
             settingsFile: URL(filePath: "/Users/dev/.claude/settings.json"),

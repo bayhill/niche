@@ -104,11 +104,14 @@ public struct HookEvent: Sendable, Equatable {
 }
 
 /// Drains the spool folder the bridge writes to. Files are read oldest first and deleted once read, including
-/// ones that cannot be parsed. Dot-files are the bridge's in-flight temp files; they are left alone unless stale.
+/// ones that cannot be parsed; stale ones are deleted unread. Dot-files are the bridge's in-flight temp files; they are left alone unless stale.
 public struct SpoolReader: Sendable {
     public let directory: URL
     /// In-flight temp files older than this are leftovers from a killed hook and are removed.
     public var staleTempAge: TimeInterval = 600
+    /// Events older than this are deleted unread instead of replayed (left over from a crash; the app drains every
+    /// few seconds while it runs).
+    public var maxEventAge: TimeInterval = 120
 
     public init(directory: URL) { self.directory = directory }
 
@@ -127,6 +130,10 @@ public struct SpoolReader: Sendable {
                 continue
             }
             guard name.hasSuffix(".json") else { continue }
+            if now.timeIntervalSince(date) > maxEventAge {
+                try? fm.removeItem(at: url)
+                continue
+            }
             files.append((url, date))
         }
         files.sort { $0.date != $1.date ? $0.date < $1.date : $0.url.lastPathComponent < $1.url.lastPathComponent }

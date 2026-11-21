@@ -134,14 +134,18 @@ public struct SessionReducer: Sendable {
     public private(set) var registryAvailable = false
     private var registry: [String: RegistryTrack] = [:]
     private var hooks: [String: HookTrack] = [:]
-    private var seenInRegistry: Set<String> = []
+    /// Session id → when it was last seen in the registry. Pruned an hour after it leaves.
+    private var seenInRegistry: [String: Date] = [:]
     private var ended: [String: Date] = [:]
 
     public init(config: Config = Config()) { self.config = config }
 
     // MARK: Input
 
-    public mutating func applyRegistry(_ snapshot: RegistrySnapshot) {
+    /// How long ended-session and left-the-registry memories are kept for (late async events).
+    public static let memory: TimeInterval = 3600
+
+    public mutating func applyRegistry(_ snapshot: RegistrySnapshot, now: Date = Date()) {
         registryAvailable = snapshot.available
         var next: [String: RegistryTrack] = [:]
         for record in snapshot.records {
@@ -165,7 +169,7 @@ public struct SessionReducer: Sendable {
                 hooks[id]?.observation = nil
             }
             next[id] = RegistryTrack(record: record, observation: observation)
-            seenInRegistry.insert(id)
+            seenInRegistry[id] = now
         }
         for id in registry.keys where next[id] == nil { hooks[id] = nil }
         registry = next
@@ -198,6 +202,20 @@ public struct SessionReducer: Sendable {
         hooks[id] = track
     }
 
+    /// Forgets what can no longer matter, so memory stays bounded however long the app runs: tombstones and
+    /// registry sightings after `memory`, and hook-only sessions once they are past every visibility limit.
+    public mutating func prune(now: Date) {
+        ended = ended.filter { now.timeIntervalSince($0.value) < Self.memory }
+        seenInRegistry = seenInRegistry.filter { registry[$0.key] != nil || now.timeIntervalSince($0.value) < Self.memory }
+        let hookOnlyLimit = registryAvailable ? max(config.attentionGrace, config.hookOnlyGrace) : config.hookOnlyTTL
+        hooks = hooks.filter { registry[$0.key] != nil || now.timeIntervalSince($0.value.lastEvent) <= hookOnlyLimit }
+    }
+
+    /// Sizes of the internal maps, for tests.
+    var memoryFootprint: (registry: Int, hooks: Int, seen: Int, ended: Int) {
+        (registry.count, hooks.count, seenInRegistry.count, ended.count)
+    }
+
     // MARK: Output
 
     /// Every session to show, ordered: needs the user, then working, then idle/finished; newest change first.
@@ -207,7 +225,7 @@ public struct SessionReducer: Sendable {
             let reg = registry[id]
             let hook = hooks[id]
             if reg == nil {
-                guard let hook, !seenInRegistry.contains(id) else { continue }
+                guard let hook, seenInRegistry[id] == nil else { continue }
                 let needs = hook.observation?.signal.needsUser ?? false
                 let limit = registryAvailable ? (needs ? config.attentionGrace : config.hookOnlyGrace) : config.hookOnlyTTL
                 guard now.timeIntervalSince(hook.lastEvent) <= limit else { continue }

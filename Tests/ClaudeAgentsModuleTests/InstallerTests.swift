@@ -80,7 +80,7 @@ import Testing
         #expect(PlannedCommand(executable: s.cli, arguments: ["add", "/a b/it's"]).display == "\(s.cli.path) add '/a b/it'\\''s'")
     }
 
-    @Test func installCopiesBacksUpRunsAndCreatesSpool() async throws {
+    @Test func installCopiesBacksUpAndRunsButLeavesTheSpoolToTheModule() async throws {
         let s = try Setup()
         defer { s.cleanUp() }
         let runner = RecordingRunner(settings: s.settings)
@@ -97,11 +97,11 @@ import Testing
         let fm = FileManager.default
         #expect(fm.fileExists(atPath: s.paths.installedPlugin.appending(path: ".claude-plugin/marketplace.json").path))
         #expect(fm.isExecutableFile(atPath: s.paths.installedPlugin.appending(path: "plugins/notcher-bridge/scripts/forward.sh").path))
-        var isDir: ObjCBool = false
-        #expect(fm.fileExists(atPath: s.paths.spool.path, isDirectory: &isDir) && isDir.boolValue)
+        #expect(!fm.fileExists(atPath: s.paths.spool.path), "the module creates the spool, only with alerts enabled")
         let backups = try fm.contentsOfDirectory(atPath: s.paths.backups.path)
         #expect(backups.count == 1 && backups[0].hasPrefix("settings-") && backups[0].hasSuffix(".json"))
         #expect(try Data(contentsOf: s.paths.backups.appending(path: backups[0])) == originalSettings)
+        #expect(result.message.contains(s.paths.backups.path), "the result says where the backup is")
         #expect(installer.status() == .installed)
         let after = try s.settingsObject()
         #expect(after["model"] as? String == "opus", "other keys untouched by our (simulated) CLI")
@@ -142,16 +142,50 @@ import Testing
         #expect(!FileManager.default.fileExists(atPath: s.paths.installedPlugin.path))
     }
 
-    @Test func failingCommandStopsBeforeEnablingAlerts() async throws {
+    @Test func failedPluginInstallRollsBackTheMarketplace() async throws {
         let s = try Setup()
         defer { s.cleanUp() }
         let runner = RecordingRunner(settings: s.settings, failOn: "install")
         let installer = s.installer(runner)
         let result = await installer.install()
-        #expect(!result.succeeded)
+        #expect(!result.succeeded && result.message.contains("removed again"))
         #expect(result.log.contains { $0.contains("exit 1") && $0.contains("boom") })
-        #expect(!FileManager.default.fileExists(atPath: s.paths.spool.path), "no spool, so the bridge stays silent")
+        let calls = await runner.calls.map(\.arguments)
+        #expect(calls.first == ["plugin", "marketplace", "add", s.paths.installedPlugin.path, "--scope", "user"])
+        #expect(calls.last == ["plugin", "marketplace", "remove", "notcher-local", "--scope", "user"])
+        let settings = try s.settingsObject()
+        #expect((settings["extraKnownMarketplaces"] as? [String: Any])?["notcher-local"] == nil, "no marketplace entry left behind")
         #expect(installer.status() == .notInstalled)
+        #expect(!FileManager.default.fileExists(atPath: s.paths.spool.path))
+    }
+
+    @Test func retryAfterPartialInstallSucceeds() async throws {
+        let s = try Setup(settingsJSON: #"{"extraKnownMarketplaces":{"notcher-local":{"source":{"source":"directory","path":"/x"}}}}"#)
+        defer { s.cleanUp() }
+        let installer = s.installer(RecordingRunner(settings: s.settings))
+        let result = await installer.install()
+        #expect(result.succeeded)
+        #expect(installer.status() == .installed)
+        #expect(HookInstaller.alreadyPresent(ProcessResult(status: 1, stderr: "Marketplace 'notcher-local' already exists")))
+        #expect(HookInstaller.alreadyPresent(ProcessResult(status: 0, stdout: "Plugin \"x\" is already installed (scope: user)")))
+        #expect(!HookInstaller.alreadyPresent(ProcessResult(status: 1, stderr: "boom")))
+    }
+
+    @Test func backupsArePrivateAndFew() throws {
+        let s = try Setup()
+        defer { s.cleanUp() }
+        let installer = s.installer(RecordingRunner(settings: s.settings))
+        var made: [URL] = []
+        for _ in 0..<5 { made.append(try #require(try installer.backupSettings())) }
+        let fm = FileManager.default
+        let left = try fm.contentsOfDirectory(atPath: s.paths.backups.path).sorted()
+        #expect(left.count == HookInstaller.backupsKept)
+        #expect(Set(left) == Set(made.suffix(3).map(\.lastPathComponent)), "the newest are kept")
+        for name in left {
+            let perms = try fm.attributesOfItem(atPath: s.paths.backups.appending(path: name).path)[.posixPermissions] as? Int
+            #expect(perms == 0o600)
+        }
+        #expect(try fm.attributesOfItem(atPath: s.paths.backups.path)[.posixPermissions] as? Int == 0o700)
     }
 
     @Test func uninstallWithoutCLIStillSilencesAndSaysWhatIsLeft() async throws {
@@ -173,10 +207,9 @@ import Testing
         _ = await installer.install()
         let script = s.paths.installedPlugin.appending(path: "plugins/notcher-bridge/scripts/forward.sh")
         try Data("old".utf8).write(to: script)
-        try FileManager.default.removeItem(at: s.paths.spool)
         installer.prepare()
         #expect(HookInstaller.sameContents(s.paths.bundledPlugin!, s.paths.installedPlugin))
-        #expect(FileManager.default.fileExists(atPath: s.paths.spool.path))
+        #expect(!FileManager.default.fileExists(atPath: s.paths.spool.path), "prepare never switches alerts on")
 
         let fresh = try Setup()
         defer { fresh.cleanUp() }

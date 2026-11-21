@@ -93,19 +93,41 @@ public enum ClaudeActivity {
     }
 }
 
+/// Whether alerts are on, combining the user's choice (`ClaudeAgentsModule.alertsEnabled`) with what Claude Code
+/// has registered.
+public enum AlertsState: Sendable, Equatable {
+    /// Enabled and registered: events flow while Notcher runs.
+    case on
+    /// Not registered in Claude Code.
+    case off
+    /// Switched off in Notcher, but Claude Code still lists the plugin (a removal failed, or it was installed
+    /// before this setting existed). Nothing is collected: the spool folder does not exist.
+    case offStillRegistered
+    /// Not registered and no `claude` executable to register it with.
+    case unavailable
+
+    public init(enabled: Bool, hookStatus: HookInstallStatus) {
+        switch hookStatus {
+        case .installed: self = enabled ? .on : .offStillRegistered
+        case .notInstalled: self = .off
+        case .cliNotFound: self = .unavailable
+        }
+    }
+}
+
 /// What the half-height card shows: the most important sessions, how many are left out, and whether the quiet
-/// "Enable alerts" affordance appears (hooks not installed and at least one session running).
+/// "Enable alerts" affordance appears (alerts not on and at least one session running).
 public struct SessionCardContent: Sendable, Equatable {
     public var rows: [ClaudeSession]
     public var hiddenCount: Int
     public var showsEnableAlerts: Bool
 
-    public static func make(sessions: [ClaudeSession], hookStatus: HookInstallStatus, limit: Int = ClaudeAgentsModuleLayout.visibleRows) -> SessionCardContent {
+    public static func make(sessions: [ClaudeSession], alerts: AlertsState, limit: Int = ClaudeAgentsModuleLayout.visibleRows) -> SessionCardContent {
         let ordered = SessionReducer.ordered(sessions)
         let rows = Array(ordered.prefix(max(0, limit)))
         return SessionCardContent(
             rows: rows, hiddenCount: ordered.count - rows.count,
-            showsEnableAlerts: hookStatus != .installed && !ordered.isEmpty
+            showsEnableAlerts: alerts != .on && !ordered.isEmpty
         )
     }
 }

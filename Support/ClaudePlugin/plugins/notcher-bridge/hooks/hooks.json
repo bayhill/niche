@@ -1,15 +1,12 @@
 {
-  "description": "Copies each event's JSON into Notcher's spool folder. Silent, and a no-op while Notcher's alerts are off.",
+  "description": "Passes a few fields of each event (no prompts or tool content) to Notcher's spool folder. Silent, and a no-op while Notcher's alerts are off.",
   "hooks": {
     "SessionStart": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "/bin/bash",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/forward.sh"
-            ],
+            "command": "/bin/bash \"${CLAUDE_PLUGIN_ROOT}/scripts/forward.sh\"",
             "async": true,
             "timeout": 5
           }
@@ -21,10 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/bin/bash",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/forward.sh"
-            ],
+            "command": "/bin/bash \"${CLAUDE_PLUGIN_ROOT}/scripts/forward.sh\"",
             "async": true,
             "timeout": 5
           }
@@ -36,10 +30,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/bin/bash",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/forward.sh"
-            ],
+            "command": "/bin/bash \"${CLAUDE_PLUGIN_ROOT}/scripts/forward.sh\"",
             "async": true,
             "timeout": 5
           }
@@ -51,10 +42,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/bin/bash",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/forward.sh"
-            ],
+            "command": "/bin/bash \"${CLAUDE_PLUGIN_ROOT}/scripts/forward.sh\"",
             "async": true,
             "timeout": 5
           }
@@ -66,10 +54,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/bin/bash",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/forward.sh"
-            ],
+            "command": "/bin/bash \"${CLAUDE_PLUGIN_ROOT}/scripts/forward.sh\"",
             "async": true,
             "timeout": 5
           }
@@ -81,10 +66,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/bin/bash",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/forward.sh"
-            ],
+            "command": "/bin/bash \"${CLAUDE_PLUGIN_ROOT}/scripts/forward.sh\"",
             "async": true,
             "timeout": 5
           }
@@ -96,10 +78,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/bin/bash",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/forward.sh"
-            ],
+            "command": "/bin/bash \"${CLAUDE_PLUGIN_ROOT}/scripts/forward.sh\"",
             "async": true,
             "timeout": 5
           }
@@ -111,10 +90,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/bin/bash",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/forward.sh"
-            ],
+            "command": "/bin/bash \"${CLAUDE_PLUGIN_ROOT}/scripts/forward.sh\"",
             "async": true,
             "timeout": 5
           }
@@ -126,10 +102,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/bin/bash",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/forward.sh"
-            ],
+            "command": "/bin/bash \"${CLAUDE_PLUGIN_ROOT}/scripts/forward.sh\"",
             "timeout": 5
           }
         ]

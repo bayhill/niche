@@ -36,7 +36,7 @@ final class RecordingActivator: SessionActivating {
         #expect(m.sessions.prefix(2).allSatisfy { $0.state.needsUser })
         #expect(m.liveActivity?.priority == .attention)
         #expect(m.liveActivity?.trailing == .text("2"))
-        let card = SessionCardContent.make(sessions: m.sessions, hookStatus: m.hookStatus)
+        let card = SessionCardContent.make(sessions: m.sessions, alerts: m.alertsState)
         #expect(card.rows.count == 2 && card.hiddenCount == 3 && card.showsEnableAlerts)
     }
 
@@ -62,6 +62,7 @@ final class RecordingActivator: SessionActivating {
         )
         var opened: [ModuleID?] = []
         env.services.openSettings = { opened.append($0) }
+        env.settings.set(ClaudeAgentsModule.alertsEnabled, true)
         await module.start(env.context(for: .claudeAgents))
         await module.refresh()
 
@@ -86,6 +87,87 @@ final class RecordingActivator: SessionActivating {
         await module.start(env.context(for: .claudeAgents))
         module.stop()
         #expect(await runner.calls.isEmpty, "starting never installs anything")
+    }
+
+    /// Builds a module around a real HookInstaller in temp dirs with a recording runner (no real `claude`).
+    func installerModule(_ env: TestEnvironment, failOn: String? = nil) throws -> (ClaudeAgentsModule, RecordingRunner, HookInstaller.Paths) {
+        let fm = FileManager.default
+        let cli = env.directories.home.appending(path: ".local/bin/claude")
+        try fm.createDirectory(at: cli.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try fm.createDirectory(at: env.directories.home.appending(path: ".claude"), withIntermediateDirectories: true)
+        try Data("#!/bin/sh\nexit 0\n".utf8).write(to: cli)
+        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: cli.path)
+        let paths = HookInstaller.Paths.standard(directories: env.directories, bundledPlugin: Fixture.repoRoot.appending(path: "Support/ClaudePlugin"), searchPath: "")
+        let runner = RecordingRunner(settings: paths.claudeSettings, failOn: failOn)
+        let installer = HookInstaller(paths: paths, runner: runner, baseEnvironment: ["PATH": "/usr/bin:/bin"])
+        let module = ClaudeAgentsModule(directories: env.directories, bundledPlugin: nil, runner: runner, activator: RecordingActivator(),
+                                        installer: installer, pollInterval: .seconds(60))
+        return (module, runner, paths)
+    }
+
+    @Test func spoolExistsOnlyWhileRunningWithAlertsOn() async throws {
+        let env = try TestEnvironment()
+        defer { env.cleanUp() }
+        let (module, _, paths) = try installerModule(env)
+        let fm = FileManager.default
+        try fm.createDirectory(at: paths.spool, withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: paths.spool.appending(path: "left-from-a-crash.json"))
+        await module.start(env.context(for: .claudeAgents))
+        #expect(!fm.fileExists(atPath: paths.spool.path), "alerts off: a leftover spool is removed at start")
+        #expect(module.alertsState == .off)
+
+        await module.installHooks()
+        #expect(module.lastResult?.succeeded == true)
+        #expect(env.settings.get(ClaudeAgentsModule.alertsEnabled))
+        #expect(module.alertsState == .on)
+        #expect(fm.fileExists(atPath: paths.spool.path))
+
+        module.stop()
+        #expect(!fm.fileExists(atPath: paths.spool.path), "stop removes the spool, so a quit or disabled app collects nothing")
+        await module.start(env.context(for: .claudeAgents))
+        #expect(fm.fileExists(atPath: paths.spool.path), "start after stop works and recreates it")
+        try Fixture.hook("Stop").write(to: paths.spool.appending(path: "1-1-1.json"))
+        await module.refresh()
+        #expect(try fm.contentsOfDirectory(atPath: paths.spool.path).isEmpty)
+        module.stop()
+        module.stop()
+        #expect(!fm.fileExists(atPath: paths.spool.path))
+    }
+
+    @Test func failedRemovalStaysOffAcrossRestarts() async throws {
+        let env = try TestEnvironment()
+        defer { env.cleanUp() }
+        let (module, _, paths) = try installerModule(env, failOn: "uninstall")
+        await module.start(env.context(for: .claudeAgents))
+        await module.installHooks()
+        #expect(module.alertsState == .on)
+        await module.uninstallHooks()
+        #expect(module.lastResult?.succeeded == false)
+        #expect(!env.settings.get(ClaudeAgentsModule.alertsEnabled))
+        #expect(module.alertsState == .offStillRegistered, "honest: off, but still registered in Claude Code")
+        #expect(!FileManager.default.fileExists(atPath: paths.spool.path))
+        module.stop()
+        await module.start(env.context(for: .claudeAgents))
+        #expect(!FileManager.default.fileExists(atPath: paths.spool.path), "a relaunch does not re-enable collection")
+        #expect(module.alertsState == .offStillRegistered)
+        module.stop()
+    }
+
+    @Test func installNeedsTheSettingsStore() async throws {
+        let env = try TestEnvironment()
+        defer { env.cleanUp() }
+        let (module, runner, _) = try installerModule(env)
+        #expect(!module.canChangeAlerts)
+        await module.installHooks()
+        #expect(await runner.calls.isEmpty, "not started: nothing to record the choice in, so nothing runs")
+    }
+
+    @Test func alertsStateTable() {
+        #expect(AlertsState(enabled: true, hookStatus: .installed) == .on)
+        #expect(AlertsState(enabled: false, hookStatus: .installed) == .offStillRegistered)
+        #expect(AlertsState(enabled: true, hookStatus: .notInstalled) == .off)
+        #expect(AlertsState(enabled: false, hookStatus: .notInstalled) == .off)
+        #expect(AlertsState(enabled: false, hookStatus: .cliNotFound) == .unavailable)
     }
 
     @Test func cardFitsTwoRowsInItsFrame() {

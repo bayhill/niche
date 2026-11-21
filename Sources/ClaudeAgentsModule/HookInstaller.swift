@@ -233,11 +233,11 @@ public struct HookInstaller: HookInstalling {
             installSteps: [
                 "Copy the plugin from the app to \(paths.installedPlugin.path)",
                 "Back up \(paths.claudeSettings.path) to \(paths.backups.appending(path: fileName).path)",
-                "Run the two commands below",
-                "Create \(paths.spool.path)",
+                "Run the two commands below (if the second fails, the first is undone)",
+                "While Notcher runs with alerts on, keep \(paths.spool.path) for the plugin to drop events in",
             ],
             uninstallSteps: [
-                "Remove \(paths.spool.path) (alerts stop at once)",
+                "Turn alerts off and remove \(paths.spool.path) (nothing more is collected)",
                 "Back up \(paths.claudeSettings.path) to \(paths.backups.path)",
                 "Run the two uninstall commands",
                 "Remove \(paths.installedPlugin.path)",
@@ -251,6 +251,9 @@ public struct HookInstaller: HookInstalling {
 
     // MARK: Install / uninstall
 
+    /// Copies the plugin, backs up settings.json, then runs `marketplace add` and `plugin install`. Either being
+    /// already present counts as success, so a retry after a partial failure works. If `plugin install` fails, the
+    /// marketplace entry is removed again. It does not switch alerts on; the module does that on success.
     public func install() async -> InstallResult {
         var log: [String] = []
         guard let cli = locateCLI() else {
@@ -261,29 +264,37 @@ public struct HookInstaller: HookInstalling {
         else {
             return InstallResult(succeeded: false, message: "The plugin is missing from the app bundle. Reinstall Notcher and try again.")
         }
+        let backup: URL?
         do {
             try copyPlugin(from: source)
             log.append("Copied plugin to \(paths.installedPlugin.path)")
-            if let backup = try backupSettings() { log.append("Backed up settings.json to \(backup.path)") }
+            backup = try backupSettings()
+            if let backup { log.append("Backed up settings.json to \(backup.path)") }
         } catch {
             return InstallResult(succeeded: false, message: "Could not prepare the plugin: \(error.localizedDescription)", log: log)
         }
-        for command in plan().installCommands {
-            let resolved = PlannedCommand(executable: cli, arguments: command.arguments)
-            let result = await run(resolved, log: &log)
-            guard result?.status == 0 else {
-                return InstallResult(succeeded: false, message: "Claude Code reported an error, so the remaining steps were skipped. Check the details below.", log: log)
-            }
+        let note = backupNote(backup)
+        let commands = plan().installCommands.map { PlannedCommand(executable: cli, arguments: $0.arguments) }
+        guard let add = await run(commands[0], log: &log), add.status == 0 || Self.alreadyPresent(add) else {
+            return InstallResult(succeeded: false, message: "Claude Code could not add the plugin's marketplace, so nothing was changed. Check the details below.\(note)", log: log)
         }
-        do {
-            try FileManager.default.createDirectory(at: paths.spool, withIntermediateDirectories: true)
-            log.append("Created \(paths.spool.path)")
-        } catch {
-            return InstallResult(succeeded: false, message: "Installed, but could not create the event folder: \(error.localizedDescription)", log: log)
+        if let install = await run(commands[1], log: &log), install.status == 0 || Self.alreadyPresent(install) {
+            return InstallResult(
+                succeeded: true,
+                message: "Alerts are on. New sessions report to Notcher; run /reload-plugins in sessions that are already open.\(note)",
+                log: log
+            )
         }
+        log.append("Rolling back")
+        for command in plan().uninstallCommands {
+            _ = await run(PlannedCommand(executable: cli, arguments: command.arguments), log: &log)
+        }
+        let rolledBack = !Self.declaresMarketplace(in: readSettings()) && !Self.isEnabled(in: readSettings())
         return InstallResult(
-            succeeded: true,
-            message: "Alerts are on. Sessions started from now on report to Notcher; run /reload-plugins in sessions that are already open.",
+            succeeded: false,
+            message: rolledBack
+                ? "Claude Code could not install the plugin, so its marketplace entry was removed again. Check the details below.\(note)"
+                : "Claude Code could not install the plugin, and removing its marketplace entry also failed. Use Remove from Claude Code to retry.\(note)",
             log: log
         )
     }
@@ -295,7 +306,9 @@ public struct HookInstaller: HookInstalling {
             try? fm.removeItem(at: paths.spool)
             log.append("Removed \(paths.spool.path)")
         }
-        if let backup = try? backupSettings() { log.append("Backed up settings.json to \(backup.path)") }
+        let backup = try? backupSettings()
+        if let backup { log.append("Backed up settings.json to \(backup.path)") }
+        let note = backupNote(backup)
         let cli = locateCLI()
         if let cli {
             for command in plan().uninstallCommands {
@@ -307,7 +320,7 @@ public struct HookInstaller: HookInstalling {
             let why = cli == nil ? "Claude Code's command-line tool was not found, so" : "Claude Code did not confirm the removal, so"
             return InstallResult(
                 succeeded: false,
-                message: "Alerts are off, but \(why) settings.json still lists the plugin. Run the uninstall commands shown above in Terminal.",
+                message: "Alerts are off and nothing is collected, but \(why) Claude Code still lists the plugin. Retry, or run the uninstall commands above in Terminal.\(note)",
                 log: log
             )
         }
@@ -315,18 +328,22 @@ public struct HookInstaller: HookInstalling {
             try? fm.removeItem(at: paths.installedPlugin)
             log.append("Removed \(paths.installedPlugin.path)")
         }
-        return InstallResult(succeeded: true, message: "Alerts are off and the plugin is removed from Claude Code.", log: log)
+        return InstallResult(succeeded: true, message: "Alerts are off and the plugin is removed from Claude Code.\(note)", log: log)
     }
 
+    /// Refreshes the installed plugin copy from the app bundle when the plugin is registered and the copy differs.
+    /// Never creates the spool: that is the module's job, and only while alerts are enabled.
     public func prepare() {
         guard status() == .installed else { return }
         let fm = FileManager.default
-        try? fm.createDirectory(at: paths.spool, withIntermediateDirectories: true)
         if let source = paths.bundledPlugin, fm.fileExists(atPath: source.path),
            !Self.sameContents(source, paths.installedPlugin) {
             try? copyPlugin(from: source)
         }
     }
+
+    /// How many settings.json backups to keep.
+    public static let backupsKept = 3
 
     // MARK: Helpers
 
@@ -357,18 +374,33 @@ public struct HookInstaller: HookInstalling {
         (settings?["enabledPlugins"] as? [String: Any])?[pluginID] as? Bool == true
     }
 
+    /// `claude plugin` reports an existing marketplace or install as already there (exit 0 in 2.1.330; older
+    /// versions may exit 1 with the same words).
+    static func alreadyPresent(_ result: ProcessResult) -> Bool {
+        let text = (result.stdout + result.stderr).lowercased()
+        return text.contains("already installed") || text.contains("already on disk") || text.contains("already exists")
+            || text.contains("already added")
+    }
+
+    private func backupNote(_ backup: URL?) -> String {
+        guard backup != nil else { return "" }
+        return " The previous settings.json is saved in \(paths.backups.path) (the last \(Self.backupsKept) are kept)."
+    }
+
     static func declaresMarketplace(in settings: [String: Any]?) -> Bool {
         (settings?["extraKnownMarketplaces"] as? [String: Any])?[marketplace] != nil
     }
 
     private func settingsBackupName(_ stamp: String) -> String { "settings-\(stamp).json" }
 
-    /// Copies settings.json into the backups folder. Returns `nil` when there is no settings.json yet.
+    /// Copies settings.json into the backups folder, readable only by the user (it can hold tokens or an
+    /// `apiKeyHelper`), and keeps only the newest `backupsKept`. Returns `nil` when there is no settings.json yet.
     @discardableResult
     func backupSettings() throws -> URL? {
         let fm = FileManager.default
         guard fm.fileExists(atPath: paths.claudeSettings.path) else { return nil }
-        try fm.createDirectory(at: paths.backups, withIntermediateDirectories: true)
+        try fm.createDirectory(at: paths.backups, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        try fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: paths.backups.path)
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "yyyyMMdd-HHmmss"
@@ -377,7 +409,19 @@ public struct HookInstaller: HookInstalling {
         while fm.fileExists(atPath: url.path) {
             url = paths.backups.appending(path: settingsBackupName(f.string(from: now()) + "-\(n)")); n += 1
         }
-        try fm.copyItem(at: paths.claudeSettings, to: url)
+        let data = try Data(contentsOf: paths.claudeSettings)
+        guard fm.createFile(atPath: url.path, contents: data, attributes: [.posixPermissions: 0o600]) else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        let all = (try? fm.contentsOfDirectory(at: paths.backups, includingPropertiesForKeys: [.creationDateKey])) ?? []
+        let backups = all.filter { $0.lastPathComponent.hasPrefix("settings-") && $0.pathExtension == "json" }
+            .sorted { a, b in
+                let da = (try? a.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast
+                let db = (try? b.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast
+                return da != db ? da > db : a.lastPathComponent > b.lastPathComponent
+            }
+        for old in backups.dropFirst(Self.backupsKept) where old != url { try? fm.removeItem(at: old) }
         return url
     }
 

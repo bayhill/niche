@@ -7,16 +7,10 @@ struct ClaudeCard: View {
     let module: ClaudeAgentsModule
 
     var body: some View {
-        let content = SessionCardContent.make(sessions: module.sessions, hookStatus: module.hookStatus)
+        let content = SessionCardContent.make(sessions: module.sessions, alerts: module.alertsState)
         GlassCard(spacing: 0) {
             if content.rows.isEmpty {
-                // One line: the 63 pt of content height is too short for EmptyState's stacked symbol and title.
-                HStack(spacing: Tokens.Spacing.xs) {
-                    Image(systemName: "sparkles").font(NotchTextStyle.caption.font).foregroundStyle(Tokens.Colors.textTertiary)
-                    Text("No sessions running").notchStyle(.caption).lineLimit(1)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .accessibilityElement(children: .combine)
+                EmptyState(symbol: "sparkles", title: "No sessions running", compact: true)
             } else {
                 TimelineView(.periodic(from: .now, by: 15)) { context in
                     VStack(alignment: .leading, spacing: Tokens.Spacing.xs) {
@@ -116,14 +110,14 @@ struct ClaudeSettingsView: View {
         Form {
             Section("Claude Code alerts") {
                 Text("Notcher shows which Claude Code sessions are running. Alerts add the moment a session needs permission or input, or finishes, beside the closed notch.")
-                Text("Install adds a small Claude Code plugin, notcher-bridge, that hands each session event to Notcher. It sends nothing over the network, prints nothing into sessions and stays inactive while alerts are off.")
+                Text("Install adds a small Claude Code plugin, notcher-bridge. For each session event it passes the session, folder, event name, tool name and notification text to Notcher; prompts, tool input and tool output are never written. Nothing is collected while alerts are off or Notcher is not running, and nothing goes over the network.")
                     .foregroundStyle(.secondary)
                 LabeledContent("Status") {
                     Label(statusText, systemImage: statusSymbol).symbolRenderingMode(.multicolor)
                 }
             }
             if let plan = module.plan {
-                Section(module.hookStatus == .installed ? "Installed with" : "What install does") {
+                Section(module.alertsState == .on ? "Installed with" : "What install does") {
                     ForEach(Array(plan.installSteps.enumerated()), id: \.offset) { i, step in
                         Text("\(i + 1). \(step)").textSelection(.enabled)
                     }
@@ -148,13 +142,23 @@ struct ClaudeSettingsView: View {
                 }
             }
             Section {
+                if module.alertsState == .offStillRegistered {
+                    Text("Alerts are off and nothing is collected, but Claude Code still lists the notcher-bridge plugin. Remove it, or turn alerts back on.")
+                }
+                if !module.canChangeAlerts {
+                    Text("Turn the Claude module on to set up alerts.").foregroundStyle(.secondary)
+                }
                 HStack {
-                    if module.hookStatus == .installed {
-                        Button("Uninstall") { Task { await module.uninstallHooks() } }
-                    } else {
+                    switch module.alertsState {
+                    case .on:
+                        Button("Turn off") { Task { await module.uninstallHooks() } }
+                    case .offStillRegistered:
+                        Button("Remove from Claude Code") { Task { await module.uninstallHooks() } }
+                        Button("Turn on") { Task { await module.installHooks() } }
+                    case .off, .unavailable:
                         Button("Install") { Task { await module.installHooks() } }
                             .buttonStyle(.borderedProminent)
-                            .disabled(module.hookStatus == .cliNotFound)
+                            .disabled(module.alertsState == .unavailable || !module.canChangeAlerts)
                     }
                     if module.isChangingHooks { ProgressView().controlSize(.small) }
                 }
@@ -175,18 +179,19 @@ struct ClaudeSettingsView: View {
     }
 
     private var statusText: String {
-        switch module.hookStatus {
-        case .installed: "On"
-        case .notInstalled: "Off"
-        case .cliNotFound: "Off. Install Claude Code to turn alerts on"
+        switch module.alertsState {
+        case .on: "On"
+        case .off: "Off"
+        case .offStillRegistered: "Off, plugin still registered in Claude Code"
+        case .unavailable: "Off. Install Claude Code to turn alerts on"
         }
     }
 
     private var statusSymbol: String {
-        switch module.hookStatus {
-        case .installed: "checkmark.circle.fill"
-        case .notInstalled: "bell.slash"
-        case .cliNotFound: "exclamationmark.triangle.fill"
+        switch module.alertsState {
+        case .on: "checkmark.circle.fill"
+        case .off: "bell.slash"
+        case .offStillRegistered, .unavailable: "exclamationmark.triangle.fill"
         }
     }
 }
