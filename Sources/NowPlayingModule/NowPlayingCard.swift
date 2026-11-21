@@ -7,18 +7,42 @@ struct NowPlayingCard: View {
 
     var body: some View {
         let state = module.state
-        GlassCard(ambient: module.ambientArtwork ? state?.artwork : nil) {
-            SectionHeader("Now Playing", symbol: "music.note") {
-                EqualizerBars(playing: state?.isPlaying ?? false)
-            }
+        let app = state == nil ? nil : module.sourceApp
+        // Zero card padding: the click area and the transport row carry the padding themselves, so together they
+        // cover the whole card, margins included.
+        GlassCard(padding: 0, spacing: 0, ambient: module.ambientArtwork ? state?.artwork : nil, hoverable: app != nil) {
             if let state {
-                TrackView(state: state, send: module.send)
+                SourceAppClickArea(app: app, open: module.openSourceApp) {
+                    VStack(alignment: .leading, spacing: Tokens.Spacing.s) {
+                        header(playing: state.isPlaying)
+                        TrackInfo(state: state)
+                        Spacer(minLength: 0)
+                    }
+                    .padding([.top, .horizontal], Tokens.Spacing.m)
+                }
+                TransportRow(state: state, send: module.send)
+                    .padding([.horizontal, .bottom], Tokens.Spacing.m)
+                    .padding(.top, Tokens.Spacing.s)
+                    .background {
+                        // Behind the buttons: a click between or beside them opens the app; a click on one never does.
+                        if app != nil {
+                            Color.clear.contentShape(Rectangle()).onTapGesture { module.openSourceApp() }.accessibilityHidden(true)
+                        }
+                    }
                     .transition(.opacity)
             } else {
-                placeholder.transition(.opacity)
+                VStack(alignment: .leading, spacing: Tokens.Spacing.s) {
+                    header(playing: false)
+                    placeholder.transition(.opacity)
+                }
+                .padding(Tokens.Spacing.m)
             }
         }
         .motion(Motion.morph, value: state == nil)
+    }
+
+    private func header(playing: Bool) -> some View {
+        SectionHeader("Now Playing", symbol: "music.note") { EqualizerBars(playing: playing) }
     }
 
     @ViewBuilder private var placeholder: some View {
@@ -57,9 +81,39 @@ private struct Prompt<Action: View>: View {
     }
 }
 
-private struct TrackView: View {
+/// Header, artwork, track lines and position: one button that opens the source app, when there is one.
+private struct SourceAppClickArea<Label: View>: View {
+    let app: SourceApp?
+    let open: () -> Void
+    @ViewBuilder let label: Label
+
+    var body: some View {
+        if let app {
+            Button(action: open) {
+                label.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).contentShape(Rectangle())
+            }
+            .buttonStyle(CardPressStyle())
+            .help(app.openLabel)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(app.openLabel)
+            .accessibilityAddTraits(.isButton)
+        } else {
+            label.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+    }
+}
+
+/// The row's press feedback (0.98 on `Motion.press`) without its padding and fill: the card already hovers.
+private struct CardPressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.98 : 1)
+            .motion(Motion.press, value: configuration.isPressed)
+    }
+}
+
+private struct TrackInfo: View {
     let state: NowPlayingState
-    let send: (MediaCommand) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: Tokens.Spacing.s) {
@@ -79,21 +133,25 @@ private struct TrackView: View {
             if state.position(at: state.timestamp ?? .now) != nil {
                 PositionRow(state: state).transition(.opacity)
             }
-
-            Spacer(minLength: 0)
-
-            HStack(spacing: Tokens.Spacing.m) {
-                GlassIconButton("backward.fill", label: "Previous track", kind: .plain, size: 28, tint: .secondary) { send(.previous) }
-                GlassIconButton(state.isPlaying ? "pause.fill" : "play.fill", label: state.isPlaying ? "Pause" : "Play", size: 32) {
-                    send(.togglePlayPause)
-                }
-                .contentTransition(.symbolEffect(.replace))
-                GlassIconButton("forward.fill", label: "Next track", kind: .plain, size: 28, tint: .secondary) { send(.next) }
-            }
-            .frame(maxWidth: .infinity)
-            .motion(Motion.quick, value: state.isPlaying)
         }
-        .accessibilityElement(children: .contain)
+    }
+}
+
+private struct TransportRow: View {
+    let state: NowPlayingState
+    let send: (MediaCommand) -> Void
+
+    var body: some View {
+        HStack(spacing: Tokens.Spacing.m) {
+            GlassIconButton("backward.fill", label: "Previous track", kind: .plain, size: 28, tint: .secondary) { send(.previous) }
+            GlassIconButton(state.isPlaying ? "pause.fill" : "play.fill", label: state.isPlaying ? "Pause" : "Play", size: 32) {
+                send(.togglePlayPause)
+            }
+            .contentTransition(.symbolEffect(.replace))
+            GlassIconButton("forward.fill", label: "Next track", kind: .plain, size: 28, tint: .secondary) { send(.next) }
+        }
+        .frame(maxWidth: .infinity)
+        .motion(Motion.quick, value: state.isPlaying)
     }
 }
 

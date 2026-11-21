@@ -97,6 +97,8 @@ public final class NowPlayingModule: NotchModule {
     public var ambientArtwork: Bool { settings?.get(Self.ambientArtwork) ?? Self.ambientArtwork.defaultValue }
     /// The store from `start`, for `settingsView()`.
     var settingsStore: SettingsStore? { settings }
+    /// The app the current track plays from, when it can be brought forward. `nil` = the card is not clickable.
+    public private(set) var sourceApp: SourceApp?
     /// The self-test result in use, for Settings.
     public private(set) var lastCheck: AdapterCheck?
     public private(set) var isChecking = false
@@ -113,6 +115,8 @@ public final class NowPlayingModule: NotchModule {
     @ObservationIgnored private let now: @MainActor () -> Date
     @ObservationIgnored private var active: (any NowPlayingProvider)?
     @ObservationIgnored private var settings: SettingsStore?
+    @ObservationIgnored private var services: AppServices?
+    @ObservationIgnored private let opener: SourceAppOpener
     @ObservationIgnored private var running = false
     @ObservationIgnored private var selection: Task<Void, Never>?
     @ObservationIgnored private var log = Log.logger(for: .nowPlaying)
@@ -128,10 +132,11 @@ public final class NowPlayingModule: NotchModule {
         adapter: (any NowPlayingProvider)?, adapterSelfTest: @escaping @Sendable () async -> AdapterTestOutcome,
         selfTestKey: String? = nil, verifyAfter: Duration = .seconds(15), fallback: (any NowPlayingProvider)?,
         now: @escaping @MainActor () -> Date = { .now },
-        sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+        sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
+        opener: SourceAppOpener = .inert
     ) {
         self.adapter = adapter; self.adapterSelfTest = adapterSelfTest; self.selfTestKey = selfTestKey
-        self.verifyAfter = verifyAfter; self.fallback = fallback; self.now = now; self.sleep = sleep
+        self.verifyAfter = verifyAfter; self.fallback = fallback; self.now = now; self.sleep = sleep; self.opener = opener
     }
 
     /// Adapter from the app bundle (if present) with the Spotify/Music fallback.
@@ -142,7 +147,7 @@ public final class NowPlayingModule: NotchModule {
         return NowPlayingModule(
             adapter: locations.map { AdapterProvider(locations: $0) }, adapterSelfTest: selfTest,
             selfTestKey: locations.map { AdapterCheck.key(os: ProcessInfo.processInfo.operatingSystemVersionString, adapter: $0.identity) },
-            fallback: AppleScriptProvider()
+            fallback: AppleScriptProvider(), opener: .live
         )
     }
 
@@ -158,6 +163,7 @@ public final class NowPlayingModule: NotchModule {
         guard !running else { return }
         running = true
         settings = context.settings
+        services = context.services
         log = context.log
         retriedAfterGiveUp = false
         observeTitleSetting()
@@ -279,6 +285,14 @@ public final class NowPlayingModule: NotchModule {
         active?.send(command)
     }
 
+    /// Brings the source app forward (activates it, or launches it if it quit) and collapses the notch.
+    /// Does nothing when the card is not clickable.
+    public func openSourceApp() {
+        guard let app = sourceApp ?? opener.resolve(state?.bundleID) else { return }
+        guard opener.open(app) != .unavailable else { return }
+        services?.notch?.collapse()
+    }
+
     /// - Parameter mayPrompt: only `start` passes the context's value; later decisions never prompt on their own.
     func select(adapterPassed: Bool, mayPrompt: Bool = false) {
         let choice = NowPlayingSelection.choose(
@@ -332,7 +346,9 @@ public final class NowPlayingModule: NotchModule {
     private func apply(_ new: NowPlayingState?) {
         if new != nil, verifying, let active, active === adapter { confirmAdapter() }
         guard new != state else { return }
+        let bundleChanged = new?.bundleID != state?.bundleID
         Motion.animate(Motion.morph) { state = new }
+        if bundleChanged { sourceApp = opener.resolve(new?.bundleID) }
         updateActivity()
         if new != nil, case .notAuthorized = phase, let active { phase = .active(active.source) }
     }

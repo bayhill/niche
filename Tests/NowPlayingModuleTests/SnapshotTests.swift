@@ -30,7 +30,16 @@ import Testing
         let unavailable = NowPlayingModule(adapter: nil, adapterSelfTest: { .failed }, fallback: nil)
         unavailable.select(adapterPassed: false)
 
+        let recorder = OpenerRecorder()
+        recorder.running["com.spotify.client"] = .some("Spotify")
+        let clickable = NowPlayingModule(
+            adapter: SampleProvider(state: SampleProvider.track), adapterSelfTest: { .passed }, fallback: nil, opener: recorder.opener
+        )
+        clickable.select(adapterPassed: true)
+        #expect(clickable.sourceApp?.openLabel == "Open Spotify")
+
         let cases: [(String, NowPlayingModule)] = [
+            ("np-clickable", clickable),
             ("np-playing-ambient", .sample()),
             ("np-playing-plain", plainCard),
             ("np-paused", .sample(paused)),
