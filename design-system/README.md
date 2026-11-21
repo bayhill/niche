@@ -17,6 +17,23 @@ override it. If the two disagree, the Swift code wins and this folder is out of 
 - **Web-only stand-ins**: tokens whose usage note starts "Web stand-in" approximate what macOS draws natively
   (`.glassEffect`, shadows). Never copy them into Swift.
 
+## Status in the app
+
+Written when the design was incorporated (kit tag `contracts-v3`). The files under `project/` were read from an earlier
+commit and still describe the modules as placeholders; that part is out of date.
+
+- **Adopted:** the Home layout (Next meeting leading top, Claude sessions leading bottom, Now Playing centre, Convert
+  trailing), the Now Playing card with position bar, the Convert card with per-file rows, the Clipboard page (kinds,
+  source app, age), the top-band glyphs, the content rules, and the `text-tertiary` contrast fix (now 0.50 in
+  `Tokens.Colors.textTertiary`).
+- **Adopted with a safeguard:** ambient artwork, as `GlassCard(ambient:)` with a dark veil and a Settings switch.
+- **Added to the kit for these layouts:** `PositionBar`, `SpinnerRing`, `GlassCard(ambient:hoverable:)`, a custom
+  leading slot on `ResultRow`, a compact `EmptyState`, `StatusDot(size:)`, tinted wing text, `Format.playback`,
+  `Format.age`, `Tokens.Colors.accentWash` and `accentGlass`.
+- **Deliberate differences:** the Clipboard row scrolls horizontally (there is no search yet); a drag over the open
+  panel shows the single drop target instead of targeting individual cards; the Claude sessions and Shelf layouts were
+  designed in code within the principles here, since they had no page of their own.
+
 ## Where to read
 
 | For | Read |
