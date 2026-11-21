@@ -3,8 +3,9 @@ import NotchCore
 import Testing
 @testable import NotchUI
 
-private let t0 = Date(timeIntervalSinceReferenceDate: 1_000_000)
-private func at(_ seconds: TimeInterval) -> Date { t0.addingTimeInterval(seconds) }
+private let t0 = ContinuousClock.now
+private func at(_ seconds: Double) -> NotchInstant { t0 + .milliseconds(Int((seconds * 1000).rounded())) }
+
 
 /// A machine plus a clock, so tests read as timelines.
 private struct Driver {
@@ -21,13 +22,15 @@ private struct Driver {
     }
 
     /// Moves the clock and fires every timer that has come due on the way.
-    mutating func wait(_ seconds: TimeInterval) {
-        now = now.addingTimeInterval(seconds)
+    mutating func wait(_ seconds: Double) {
+        now = now + .milliseconds(Int((seconds * 1000).rounded()))
         effects = machine.advance(to: now)
     }
 
     var state: NotchState { machine.state }
 }
+
+private func ms(_ value: Int) -> Duration { .milliseconds(value) }
 
 @Suite("State machine")
 struct StateMachineTests {
@@ -46,12 +49,12 @@ struct StateMachineTests {
 
     @Test func hoverNeedsTheDwell() {
         var d = Driver()
-        #expect(d.send(.pointerEntered) == [.schedule(.dwell, at: at(NotchStateMachine.dwellDelay))])
+        #expect(d.send(.pointerEntered) == [.schedule(.dwell, at: t0 + NotchStateMachine.dwellDelay)])
         d.wait(0.05)
         #expect(d.state == .closed)
-        // A timer that fires early (clock skew) is ignored and stays armed.
-        #expect(d.machine.send(.timer(.dwell), now: at(0.06)) == [])
-        #expect(d.machine.deadlines[.dwell] != nil)
+        // A timer delivered early is not lost: it is re-armed for its original instant.
+        #expect(d.machine.send(.timer(.dwell), now: at(0.06)) == [.schedule(.dwell, at: t0 + NotchStateMachine.dwellDelay)])
+        #expect(d.machine.deadlines[.dwell] == t0 + NotchStateMachine.dwellDelay)
         d.wait(0.07)
         #expect(d.state == .hover)
         #expect(d.machine.deadlines.isEmpty)
@@ -83,7 +86,7 @@ struct StateMachineTests {
             var d = Driver(NotchStateMachine(state: setup, hasActivity: setup != .closed))
             d.send(.click)
             #expect(d.state == .expanded)
-            #expect(!d.machine.openedByHover)
+            #expect(!d.machine.transient)
             #expect(d.machine.page == nil)
         }
     }
@@ -105,10 +108,10 @@ struct StateMachineTests {
         d.send(.pointerEntered)
         d.wait(0.12)
         #expect(d.state == .expanded)
-        #expect(d.machine.openedByHover)
+        #expect(d.machine.transient)
 
         d.send(.pointerExited)
-        #expect(d.effects == [.schedule(.leave, at: d.now.addingTimeInterval(NotchStateMachine.leaveDelay))])
+        #expect(d.effects == [.schedule(.leave, at: d.now + NotchStateMachine.leaveDelay)])
         d.wait(0.2)
         #expect(d.state == .expanded)
         // Coming back in time cancels the close.
@@ -126,7 +129,7 @@ struct StateMachineTests {
         d.send(.pointerEntered)
         d.wait(0.12)
         d.send(.click)
-        #expect(!d.machine.openedByHover)
+        #expect(!d.machine.transient)
         d.send(.pointerExited)
         #expect(d.effects.isEmpty)
         d.wait(2)
@@ -166,7 +169,60 @@ struct StateMachineTests {
             d.send(event)
             #expect(d.state == .expanded)
             #expect(d.machine.page == nil)
+            #expect(d.machine.transient)
         }
+    }
+
+    // MARK: Opened away from the pointer (hotkey, API)
+
+    @Test func aHotkeyPanelTheUserIgnoresClosesAfterTheIdleDelay() {
+        var d = Driver(NotchStateMachine(hasActivity: true))
+        d.send(.activityChanged(true))
+        #expect(d.send(.hotkey) == [.schedule(.idle, at: t0 + NotchStateMachine.idleDelay)])
+        d.wait(3.9)
+        #expect(d.state == .expanded)
+        d.wait(0.1)
+        #expect(d.state == .activity)
+    }
+
+    @Test func visitingAHotkeyPanelCancelsTheIdleCloseAndLeavingUsesTheLeaveDelay() {
+        var d = Driver()
+        d.send(.expand(page: .shelf))
+        d.wait(1)
+        #expect(d.send(.pointerEntered) == [.cancel(.idle)])
+        d.wait(10)
+        #expect(d.state == .expanded)
+        #expect(d.send(.pointerExited) == [.schedule(.leave, at: d.now + NotchStateMachine.leaveDelay)])
+        d.wait(0.3)
+        #expect(d.state == .closed)
+    }
+
+    @Test func clickingAHotkeyPanelPinsIt() {
+        var d = Driver()
+        d.send(.hotkey)
+        d.send(.pointerEntered)
+        d.send(.click)
+        #expect(!d.machine.transient)
+        d.send(.pointerExited)
+        d.wait(10)
+        #expect(d.state == .expanded)
+    }
+
+    @Test func aHotkeyWithThePointerAlreadyInsideArmsNoIdleTimer() {
+        var d = Driver(NotchStateMachine(state: .hover))
+        d.send(.pointerEntered)
+        #expect(d.send(.hotkey) == [])
+        #expect(d.machine.transient)
+        d.wait(10)
+        #expect(d.state == .expanded)
+    }
+
+    @Test func escapeOnlyComesFromTheKeyPanelAndStillCloses() {
+        var d = Driver()
+        d.send(.hotkey)
+        d.send(.escape)
+        #expect(d.state == .closed)
+        #expect(d.machine.deadlines.isEmpty)
     }
 
     @Test func expandAPIOpensOnAPageAndSwitchesPagesWhileOpen() {
@@ -257,6 +313,29 @@ struct StateMachineTests {
         #expect(d.state == .expanded && d.machine.page == .shelf)
     }
 
+    @Test func aHoverOpenedPanelStaysTransientAcrossACancelledDrag() {
+        var d = Driver(NotchStateMachine(openOnHover: true))
+        d.send(.pointerEntered)
+        d.wait(0.12)
+        #expect(d.state == .expanded && d.machine.transient)
+        d.send(.dragNear)
+        d.send(.pointerExited)
+        // Cancelled away from the panel: it comes back transient and closes after the leave delay.
+        #expect(d.send(.dragFar) == [.schedule(.leave, at: d.now + NotchStateMachine.leaveDelay)])
+        #expect(d.state == .expanded && d.machine.transient)
+        d.wait(0.3)
+        #expect(d.state == .closed)
+    }
+
+    @Test func aPinnedPanelStaysPinnedAcrossACancelledDrag() {
+        var d = Driver(NotchStateMachine(state: .expanded))
+        d.send(.dragNear)
+        d.send(.dragFar)
+        #expect(d.state == .expanded && !d.machine.transient)
+        d.wait(10)
+        #expect(d.state == .expanded)
+    }
+
     @Test func dropWhileExpandedCollapsesAfterTheDrop() {
         var d = Driver(NotchStateMachine(state: .expanded, page: .shelf, hasActivity: true))
         d.send(.dragNear)
@@ -273,7 +352,7 @@ struct StateMachineTests {
         var d = Driver()
         d.send(.dragNear)
         d.send(.dropTargetEntered)
-        #expect(d.send(.dragEnded) == [.schedule(.dropGrace, at: at(NotchStateMachine.dropGrace))])
+        #expect(d.send(.dragEnded) == [.schedule(.dropGrace, at: t0 + NotchStateMachine.dropGrace)])
         #expect(d.state == .drop)
         d.now = at(0.05)
         #expect(d.send(.dropped) == [.cancel(.dropGrace)])
@@ -289,6 +368,45 @@ struct StateMachineTests {
         #expect(d.state == .drop)
         d.wait(0.1)
         #expect(d.state == .closed)
+    }
+
+    @Test func aLateDropAfterAHighlightedTargetGaveUpIsStillAccepted() {
+        var d = Driver(NotchStateMachine(state: .expanded, page: .shelf))
+        d.send(.dragNear)
+        d.send(.dropTargetEntered)
+        d.send(.dragEnded)
+        d.wait(0.3)
+        #expect(d.state == .expanded)
+        #expect(d.machine.acceptsDrop(now: d.now))
+        d.wait(1.4)
+        #expect(d.machine.acceptsDrop(now: d.now))
+        d.send(.dropped)
+        #expect(d.state == .closed)
+        #expect(!d.machine.acceptsDrop(now: d.now))
+    }
+
+    @Test func theLateDropWindowCloses() {
+        var d = Driver()
+        d.send(.dragNear)
+        d.send(.dropTargetEntered)
+        d.send(.dragEnded)
+        d.wait(0.3)
+        d.wait(1.6)
+        #expect(!d.machine.acceptsDrop(now: d.now))
+        d.send(.dropped)
+        #expect(d.state == .closed)
+    }
+
+    @Test func noLateDropWithoutAHighlightedTarget() {
+        var d = Driver()
+        d.send(.dragNear)
+        d.send(.dragEnded)
+        #expect(!d.machine.acceptsDrop(now: d.now))
+        d.send(.dragNear)
+        d.send(.dropTargetEntered)
+        d.send(.dropTargetExited)
+        d.send(.dragFar)
+        #expect(!d.machine.acceptsDrop(now: d.now))
     }
 
     @Test func releasingAwayFromTheTargetEndsImmediately() {
@@ -360,6 +478,17 @@ struct StateMachineTests {
                 #expect(m.state == want, "\(start.rawValue) + \(name)")
             }
         }
+    }
+
+    @Test func aCancelledOrRescheduledTimerFiringLateDoesNothing() {
+        var d = Driver(NotchStateMachine(openOnHover: true))
+        d.send(.pointerEntered)
+        d.wait(0.12)
+        d.send(.pointerExited)          // leave armed for +0.3
+        d.now = d.now + ms(100)
+        d.send(.pointerEntered)         // cancelled
+        #expect(d.machine.send(.timer(.leave), now: d.now + ms(500)) == [])
+        #expect(d.machine.state == .expanded)
     }
 
     @Test func machineIsAValueSoInterruptionsCanBeReplayed() {

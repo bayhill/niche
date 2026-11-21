@@ -10,21 +10,39 @@ public struct WindowSnapshot: Sendable, Equatable {
     public init(ownerPID: pid_t, layer: Int, bounds: CGRect) { self.ownerPID = ownerPID; self.layer = layer; self.bounds = bounds }
 }
 
-/// Detects a fullscreen app on the notch screen from window bounds only. `CGWindowListCopyWindowInfo` gives bounds,
-/// layer and owner without Screen Recording permission (only window titles need it), so this never prompts.
+/// Detects a fullscreen app on the notch screen from window bounds, layers and owners only. `CGWindowListCopyWindowInfo`
+/// gives those without Screen Recording permission (only titles need it), so this never prompts.
+///
+/// Bounds alone cannot tell fullscreen from a zoomed window on a notched display: fullscreen windows stop below the
+/// camera housing, exactly where a zoomed window starts. The deciding signal is the menu bar: in a fullscreen space the
+/// window server's menu-bar window is not on that screen.
 public enum FullscreenDetector {
-    /// True when another process has a normal-layer window covering the whole screen, menu bar included.
-    public static func isFullscreen(windows: [WindowSnapshot], screenFrame: CGRect, primaryHeight: CGFloat, ownPID: pid_t) -> Bool {
-        let cg = CGRect(x: screenFrame.minX, y: primaryHeight - screenFrame.maxY, width: screenFrame.width, height: screenFrame.height)
+    /// `kCGMainMenuWindowLevel`.
+    public static let menuBarLayer = 24
+
+    /// - Parameters:
+    ///   - windows: on-screen windows in CG space (origin top-left of the primary display).
+    ///   - screen: the notch screen.
+    ///   - primaryHeight: height of the primary display, to convert the screen into CG space.
+    public static func isFullscreen(windows: [WindowSnapshot], screen: ScreenMetrics, primaryHeight: CGFloat, ownPID: pid_t) -> Bool {
+        let f = screen.frame
+        let cg = CGRect(x: f.minX, y: primaryHeight - f.maxY, width: f.width, height: f.height)
+        let menuStrip = CGRect(x: cg.minX, y: cg.minY, width: cg.width, height: max(1, screen.menuBarHeight))
+        let menuBarShown = windows.contains { w in
+            w.ownerPID != ownPID && w.layer == menuBarLayer && w.bounds.height > 0 && w.bounds.intersects(menuStrip)
+        }
+        guard !menuBarShown else { return false }
+        // A normal-layer window of another app spanning the screen's width down to its bottom edge, starting at the
+        // top (or just below the camera housing).
         return windows.contains { w in
             w.ownerPID != ownPID && w.layer == 0
-                && abs(w.bounds.minX - cg.minX) < 1 && abs(w.bounds.minY - cg.minY) < 1
-                && abs(w.bounds.width - cg.width) < 1 && abs(w.bounds.height - cg.height) < 1
+                && abs(w.bounds.minX - cg.minX) < 1 && abs(w.bounds.width - cg.width) < 1
+                && abs(w.bounds.maxY - cg.maxY) < 1 && w.bounds.minY <= cg.minY + screen.safeTop + 1
         }
     }
 
     @MainActor
-    static func current(screenFrame: CGRect) -> Bool {
+    static func current(screen: ScreenMetrics) -> Bool {
         guard let primary = NSScreen.screens.first,
               let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
         else { return false }
@@ -36,7 +54,7 @@ public enum FullscreenDetector {
             else { return nil }
             return WindowSnapshot(ownerPID: pid_t(pid), layer: layer, bounds: bounds)
         }
-        return isFullscreen(windows: windows, screenFrame: screenFrame, primaryHeight: primary.frame.height, ownPID: getpid())
+        return isFullscreen(windows: windows, screen: screen, primaryHeight: primary.frame.height, ownPID: getpid())
     }
 }
 

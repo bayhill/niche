@@ -36,10 +36,12 @@ public final class NotchController: NotchControlling {
     private var monitors: [Any] = []
     private var observers: [(NotificationCenter, NSObjectProtocol)] = []
     private var timerTasks: [NotchTimer: Task<Void, Never>] = [:]
+    /// Bumped whenever a timer is (re)scheduled or cancelled; a firing task whose token is stale does nothing.
+    private var timerGenerations: [NotchTimer: Int] = [:]
+    private let clock = ContinuousClock()
     private var expiryTask: Task<Void, Never>?
     private var demoTask: Task<Void, Never>?
     private var toggleKey: HotKey?
-    private var escapeKey: HotKey?
     private var frameMonitor: FrameRateMonitor?
     private var fullscreen = false
     private var moduleSignature: [ModuleSignature] = []
@@ -48,13 +50,16 @@ public final class NotchController: NotchControlling {
     private struct ModuleSignature: Equatable { var id: ModuleID; var placement: PanelPlacement }
 
     private struct DragTracking {
-        /// Drag pasteboard change count at the last mouse-down.
+        /// Drag pasteboard change count while the mouse was last up.
         var baseline = 0
+        var baselineTakenAt = ContinuousClock.now
         /// The mouse went down in our own panel (e.g. dragging a shelf item out): not a drop candidate.
         var internalSource = false
         var active = false
         var preview: [DropItem]?
+        var previewChangeCount = -1
         var optionKey = false
+        var accepted = false
         var poll: Task<Void, Never>?
     }
 
@@ -101,7 +106,7 @@ public final class NotchController: NotchControlling {
         observeSettings()
         installMonitors()
         installObservers()
-        drag.baseline = NSPasteboard(name: .drag).changeCount
+        refreshDragBaseline()
 
         panel.orderFrontRegardless()
         applyDebugOptions()
@@ -123,7 +128,6 @@ public final class NotchController: NotchControlling {
         drag.poll?.cancel()
         drag = DragTracking()
         toggleKey?.unregister(); toggleKey = nil
-        escapeKey?.unregister(); escapeKey = nil
         frameMonitor?.stop(); frameMonitor = nil
         panel?.orderOut(nil)
         panel = nil
@@ -152,7 +156,7 @@ public final class NotchController: NotchControlling {
 
     private func send(_ event: NotchEvent) {
         let before = machine
-        let effects = machine.send(event, now: Date())
+        let effects = machine.send(event, now: clock.now)
         perform(effects)
         if before.visual != machine.visual { render(from: before) }
     }
@@ -160,16 +164,18 @@ public final class NotchController: NotchControlling {
     private func perform(_ effects: [NotchEffect]) {
         for effect in effects {
             switch effect {
-            case .schedule(let timer, let date):
+            case .schedule(let timer, let instant):
                 timerTasks[timer]?.cancel()
-                let delay = max(0, date.timeIntervalSinceNow)
+                let generation = timerGenerations[timer, default: 0] &+ 1
+                timerGenerations[timer] = generation
                 timerTasks[timer] = Task { [weak self] in
-                    try? await Task.sleep(for: .seconds(delay))
-                    guard !Task.isCancelled, let self else { return }
+                    try? await Task.sleep(until: instant, clock: .continuous)
+                    guard !Task.isCancelled, let self, self.timerGenerations[timer] == generation else { return }
                     self.timerTasks[timer] = nil
                     self.send(.timer(timer))
                 }
             case .cancel(let timer):
+                timerGenerations[timer, default: 0] &+= 1
                 timerTasks.removeValue(forKey: timer)?.cancel()
             case .hapticTick:
                 Haptics.tick()
@@ -187,7 +193,6 @@ public final class NotchController: NotchControlling {
             model.dropTargeted = machine.dropTargeted
             model.layout = layout
         }
-        updateEscapeKey()
         if before.state == .expanded, machine.state != .expanded { relinquishKeyFocus() }
         updatePointer(NSEvent.mouseLocation)
     }
@@ -231,6 +236,7 @@ public final class NotchController: NotchControlling {
     private func handleGlobal(_ type: NSEvent.EventType, at location: CGPoint) {
         switch type {
         case .mouseMoved:
+            refreshDragBaselineIfIdle()
             updatePointer(location)
         case .leftMouseDown, .rightMouseDown, .otherMouseDown:
             if type == .leftMouseDown { beginMouseDown(fromPanel: false) }
@@ -245,6 +251,7 @@ public final class NotchController: NotchControlling {
     private func handleLocal(_ type: NSEvent.EventType, at location: CGPoint, inPanel: Bool, keyCode: Int?) -> Bool {
         switch type {
         case .mouseMoved, .leftMouseDragged:
+            if type == .mouseMoved { refreshDragBaselineIfIdle() }
             updatePointer(location)
         case .leftMouseDown, .rightMouseDown:
             if type == .leftMouseDown { beginMouseDown(fromPanel: inPanel) }
@@ -256,7 +263,8 @@ public final class NotchController: NotchControlling {
                 send(.clickOutside)
             }
         case .keyDown:
-            if keyCode == kVK_Escape, machine.state == .expanded, !pinned {
+            // Only when the panel itself is key (a module text field took focus): Esc is never taken from other apps.
+            if keyCode == kVK_Escape, inPanel, machine.state == .expanded, !pinned {
                 send(.escape)
                 return true
             }
@@ -265,23 +273,13 @@ public final class NotchController: NotchControlling {
         return false
     }
 
-    /// Makes the panel take mouse events exactly while the pointer is inside the visible shape, and reports
+    /// Makes the panel take mouse events exactly while the pointer is inside the interactive rect, and reports
     /// enter/exit to the state machine.
     private func updatePointer(_ location: CGPoint) {
         guard let panel else { return }
         let inside = model.layout.hits(location)
         if panel.ignoresMouseEvents == inside { panel.ignoresMouseEvents = !inside }
         if !pinned, inside != machine.pointerInside { send(inside ? .pointerEntered : .pointerExited) }
-    }
-
-    private func updateEscapeKey() {
-        let wanted = machine.state == .expanded && !pinned
-        if wanted, escapeKey == nil {
-            escapeKey = HotKey(keyCode: kVK_Escape, modifiers: 0) { [weak self] in self?.send(.escape) }
-        } else if !wanted, let key = escapeKey {
-            key.unregister()
-            escapeKey = nil
-        }
     }
 
     /// A module text field may have made the panel key. Hand key focus back to the frontmost app's window
@@ -294,9 +292,29 @@ public final class NotchController: NotchControlling {
 
     // MARK: - Drag tracking
 
+    /// A drag is in flight when the drag pasteboard changed since the mouse was last up. The baseline is taken at
+    /// start, after each drag, and whenever the pointer moves with no button down (throttled), never from a
+    /// mouse-down that might be handled after the drag already began.
+    private func refreshDragBaseline() {
+        drag.baseline = NSPasteboard(name: .drag).changeCount
+        drag.baselineTakenAt = clock.now
+    }
+
+    private func refreshDragBaselineIfIdle() {
+        guard !drag.active, clock.now - drag.baselineTakenAt > .milliseconds(250), NSEvent.pressedMouseButtons == 0 else { return }
+        refreshDragBaseline()
+    }
+
     private func beginMouseDown(fromPanel: Bool) {
         drag.internalSource = fromPanel
-        drag.baseline = NSPasteboard(name: .drag).changeCount
+        guard fromPanel else { return }
+        // A drag out of our own panel (a shelf item) rewrites the drag pasteboard; rebase once the button is up again.
+        Task { [weak self] in
+            while NSEvent.pressedMouseButtons & 1 != 0 {
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+            self?.refreshDragBaseline()
+        }
     }
 
     private func checkForDrag(at location: CGPoint) {
@@ -330,33 +348,47 @@ public final class NotchController: NotchControlling {
         guard drag.active else { return }
         updatePointer(location)
         let near = NotchGeometry.isNearForDrop(location, layout: model.layout)
-        let option = NSEvent.modifierFlags.contains(.option)
-        if near {
-            if drag.preview == nil || option != drag.optionKey { updateHint(option: option) }
-            if machine.state != .drop { send(.dragNear) }
-        } else if machine.state == .drop {
+        guard near else {
+            if machine.state == .drop { send(.dragFar) }
+            return
+        }
+        let accepted = dragAcceptance(NSPasteboard(name: .drag), option: NSEvent.modifierFlags.contains(.option))
+        if accepted, machine.state != .drop {
+            send(.dragNear)
+        } else if !accepted, machine.state == .drop {
             send(.dragFar)
         }
+    }
+
+    /// Whether any enabled module would take the dragged content (cached per pasteboard generation and ⌥ state),
+    /// updating the hint as a side effect.
+    private func dragAcceptance(_ pasteboard: NSPasteboard, option: Bool) -> Bool {
+        let count = pasteboard.changeCount
+        if drag.preview != nil, drag.previewChangeCount == count, drag.optionKey == option { return drag.accepted }
+        let preview = drag.previewChangeCount == count ? (drag.preview ?? DragPasteboard.preview(pasteboard)) : DragPasteboard.preview(pasteboard)
+        let modules = enabledModules
+        drag.preview = preview
+        drag.previewChangeCount = count
+        drag.optionKey = option
+        drag.accepted = DropDecision.accepts(preview, optionKey: option, among: modules)
+        if drag.accepted {
+            let hint = DropRouter.hint(for: DropPayload(items: preview, optionKey: option), among: modules) ?? .fallback
+            if hint != model.hint { Motion.animate(Motion.quick) { model.hint = hint } }
+        }
+        return drag.accepted
     }
 
     private func finishDrag() {
         drag.active = false
         drag.poll = nil
         drag.preview = nil
+        refreshDragBaseline()
         send(.dragEnded)
     }
 
-    private func updateHint(option: Bool) {
-        let preview = drag.preview ?? DragPasteboard.preview(NSPasteboard(name: .drag))
-        drag.preview = preview
-        drag.optionKey = option
-        let hint = DropRouter.hint(for: DropPayload(items: preview, optionKey: option), among: enabledModules) ?? .fallback
-        if hint != model.hint { Motion.animate(Motion.quick) { model.hint = hint } }
-    }
-
+    /// Recomputed on every use: modules can be enabled or disabled at any time.
     private var enabledModules: [any NotchModule] {
-        let disabled = Set(settings.get(CoreSettings.disabledModules))
-        return allModules.filter { !disabled.contains($0.id.rawValue) }
+        PanelContent.enabled(allModules, disabled: settings.get(CoreSettings.disabledModules))
     }
 
     // MARK: - Modules and activities
@@ -367,6 +399,8 @@ public final class NotchController: NotchControlling {
         if signature != moduleSignature {
             moduleSignature = signature
             model.modules = modules
+            // The open page's module was disabled or stopped being a page: fall back to Home.
+            if machine.page != nil, PanelContent.pageModule(machine.page, in: modules) == nil { send(.selectPage(nil)) }
         }
         refreshActivity()
         withObservationTracking {
@@ -401,7 +435,7 @@ public final class NotchController: NotchControlling {
     }
 
     private func refreshFullscreen() {
-        let value = FullscreenDetector.current(screenFrame: metrics.frame)
+        let value = FullscreenDetector.current(screen: metrics)
         guard value != fullscreen else { return }
         fullscreen = value
         refreshActivity()
@@ -449,7 +483,16 @@ public final class NotchController: NotchControlling {
                 controller?.rebuildScreen()
             }
         }
-        observe(workspace, NSWorkspace.activeSpaceDidChangeNotification) { $0.refreshFullscreen() }
+        observe(workspace, NSWorkspace.activeSpaceDidChangeNotification) { controller in
+            controller.refreshFullscreen()
+            // The menu bar settles after the space animation; look again once it has.
+            Task { @MainActor [weak controller] in
+                try? await Task.sleep(for: .milliseconds(800))
+                controller?.refreshFullscreen()
+            }
+        }
+        // "Hide Others" can hide an accessory app; the notch must never disappear with it.
+        observe(center, NSApplication.didHideNotification) { _ in NSApp.unhideWithoutActivation() }
         observe(workspace, NSWorkspace.didActivateApplicationNotification) { $0.refreshFullscreen() }
     }
 
@@ -536,7 +579,7 @@ public final class NotchController: NotchControlling {
         lines.append("notch \(r(notch))\(debug.simulateNotch != nil || !metrics.hasNotch ? " (virtual)" : "")")
         for state in NotchState.allCases {
             let l = NotchGeometry.layout(metrics: metrics, state: state, hasActivity: true, simulatedNotch: debug.simulateNotch)
-            lines.append("\(state.rawValue): window=\(r(l.windowFrame)) shape=\(r(l.shapeRect)) hit=\(r(l.hitRect)) radii=\(l.topRadius)/\(l.bottomRadius)")
+            lines.append("\(state.rawValue): window=\(r(l.windowFrame)) shape=\(r(l.shapeRect)) visible=\(r(l.visibleRect)) hit=\(l.hitRect.isNull ? "none" : r(l.hitRect)) radii=\(l.topRadius)/\(l.bottomRadius)")
         }
         print(lines.joined(separator: "\n"))
     }
@@ -545,25 +588,35 @@ public final class NotchController: NotchControlling {
 // MARK: - Drops
 
 extension NotchController: NotchDropHandling {
-    func dragUpdated(at screenPoint: CGPoint) -> NSDragOperation {
+    func dragUpdated(at screenPoint: CGPoint, pasteboard: NSPasteboard) -> NSDragOperation {
         guard machine.state == .drop else { return [] }
-        let inside = model.layout.hits(screenPoint)
+        let accepted = dragAcceptance(pasteboard, option: NSEvent.modifierFlags.contains(.option))
+        let inside = accepted && model.layout.hits(screenPoint)
         send(inside ? .dropTargetEntered : .dropTargetExited)
         return inside ? .copy : []
     }
 
     func dragExited() { send(.dropTargetExited) }
 
+    /// Also true just after a highlighted target gave up waiting, so a late drop still lands.
+    func canAcceptDrop() -> Bool { machine.acceptsDrop(now: clock.now) }
+
+    /// Returns false (so the source keeps its content) unless some module actually takes something.
     func performDrop(_ pasteboard: NSPasteboard) -> Bool {
-        guard machine.state == .drop else { return false }
+        guard machine.acceptsDrop(now: clock.now) else { return false }
         let option = NSEvent.modifierFlags.contains(.option)
         let contents = DragPasteboard.read(pasteboard)
         let modules = enabledModules
-        let downloads = directories.downloads
         if contents.promises.isEmpty {
-            deliver(DropItems.resolve(fileURLs: contents.fileURLs, imageData: contents.imageData, text: contents.text), option: option, to: modules)
+            let items = DropItems.resolve(fileURLs: contents.fileURLs, imageData: contents.imageData, text: contents.text)
+            guard DropDecision.accepts(items, optionKey: option, among: modules) else { return false }
+            deliver(items, option: option, to: modules)
         } else {
-            let receivers = contents.promises
+            // Receive only promises whose types some module accepts, so nothing unwanted is written to Downloads.
+            let wanted = DropDecision.acceptedPromises(contents.promises.map(\.fileTypes), optionKey: option, among: modules)
+            guard !wanted.isEmpty else { return false }
+            let receivers = wanted.map { contents.promises[$0] }
+            let downloads = directories.downloads
             Task { [weak self] in
                 let urls = await FilePromises.receive(receivers, into: downloads)
                 self?.deliver(DropItems.resolve(fileURLs: urls, imageData: nil, text: nil), option: option, to: modules)
@@ -572,6 +625,8 @@ extension NotchController: NotchDropHandling {
         drag.active = false
         drag.poll?.cancel()
         drag.poll = nil
+        drag.preview = nil
+        refreshDragBaseline()
         send(.dropped)
         return true
     }

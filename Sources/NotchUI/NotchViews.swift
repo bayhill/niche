@@ -37,6 +37,7 @@ struct NotchRootView: View {
         ) {
             NotchContentView(model: model)
         }
+        .opacity(layout.surfaceOpacity)
         .offset(x: layout.centerOffset)
         .frame(width: layout.windowFrame.width, height: layout.windowFrame.height, alignment: .top)
         .overlay(alignment: .bottom) {
@@ -83,17 +84,11 @@ private struct NotchChrome<Content: View>: View, Animatable {
         }
     }
 
-    /// `NotchSurface` stacks the cap and a fixed 56 pt gradient, so it cannot be shorter than this without
-    /// overflowing its frame. Shorter states draw it at this height and clip it to the real outline.
-    private var surfaceMinHeight: CGFloat { capHeight + 57 }
-
     var body: some View {
         let shape = NotchShape(topRadius: topRadius, bottomRadius: bottomRadius)
         ZStack(alignment: .top) {
             NotchSurface(shape: shape, capHeight: capHeight, glassAmount: glass)
-                .frame(width: width, height: max(height, surfaceMinHeight))
-                .frame(width: width, height: height, alignment: .top)
-                .clipShape(shape)
+                .frame(width: width, height: height)
 
             content
                 .frame(width: width, height: height, alignment: .top)

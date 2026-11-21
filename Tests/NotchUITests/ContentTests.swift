@@ -38,6 +38,18 @@ struct PanelContentTests {
         #expect(PanelContent.pageModule(nil, in: modules) == nil)
     }
 
+    @Test func modulesEnabledLaterAppearAndDisabledOnesDisappear() {
+        let modules: [any NotchModule] = [
+            FakeModule(.shelf, placement: .page(order: 0)), FakeModule(.convert, placement: .dashboard(.trailing)),
+        ]
+        #expect(PanelContent.enabled(modules, disabled: ["shelf"]).map(\.id) == [.convert])
+        #expect(PanelContent.pages(PanelContent.enabled(modules, disabled: ["shelf"])).isEmpty)
+        #expect(PanelContent.enabled(modules, disabled: []).map(\.id) == [.shelf, .convert])
+        #expect(PanelContent.pages(PanelContent.enabled(modules, disabled: [])).map(\.id) == [.shelf])
+        // A page whose module went away falls back to Home.
+        #expect(PanelContent.pageModule(.shelf, in: PanelContent.enabled(modules, disabled: ["shelf"])) == nil)
+    }
+
     @Test func settingsKeysAreNamespaced() {
         #expect(NotchSettings.openOnHover.name == "notch.openOnHover" && NotchSettings.openOnHover.defaultValue == false)
         #expect(NotchSettings.hotkeyEnabled.name == "notch.hotkeyEnabled" && NotchSettings.hotkeyEnabled.defaultValue == true)
@@ -58,7 +70,7 @@ struct DropItemTests {
     }
 
     @Test func previewStandsInForPromisedFilesByType() {
-        let items = DropItems.preview(fileURLs: [], promisedTypes: ["public.jpeg", "com.adobe.pdf"], hasImage: true, hasText: true)
+        let items = DropItems.preview(fileURLs: [], promisedTypes: [["public.jpeg"], ["com.adobe.pdf"]], hasImage: true, hasText: true)
         #expect(items.count == 2)
         #expect(items[0].isImage)
         #expect(items[1].fileURL?.pathExtension == "pdf")
@@ -74,11 +86,47 @@ struct DropItemTests {
         shelf.acceptance = { $0.fileURL != nil ? .accept(weight: DropWeight.fallback) : .reject }
         shelf.hint = DropHint(title: "Shelf", symbol: "tray")
         let modules: [any NotchModule] = [convert, shelf]
-        let promisedJPEG = DropItems.preview(fileURLs: [], promisedTypes: ["public.jpeg"], hasImage: false, hasText: false)
+        let promisedJPEG = DropItems.preview(fileURLs: [], promisedTypes: [["public.jpeg"]], hasImage: false, hasText: false)
         #expect(DropRouter.hint(for: DropPayload(items: promisedJPEG), among: modules)?.title == "Convert")
         #expect(DropRouter.hint(for: DropPayload(items: promisedJPEG, optionKey: true), among: modules)?.title == "Shelf")
         #expect(DropRouter.hint(for: DropPayload(items: [.text("")]), among: modules) == nil)
         #expect(DropHint.fallback.title == "Drop")
+    }
+
+    // MARK: Drop acceptance
+
+    func modules() -> [any NotchModule] {
+        let convert = FakeModule(.convert)
+        convert.acceptance = { $0.isImage ? .accept(weight: DropWeight.preferred) : .reject }
+        let shelf = FakeModule(.shelf)
+        shelf.acceptance = { $0.fileURL != nil ? .accept(weight: DropWeight.fallback) : .reject }
+        return [convert, shelf]
+    }
+
+    @Test func dragsNobodyWantsAreNotAccepted() {
+        let m = modules()
+        // Selected text, a link or a browser tab: text only, which no module here takes.
+        #expect(!DropDecision.accepts([.text("")], optionKey: false, among: m))
+        #expect(!DropDecision.accepts([], optionKey: false, among: m))
+        #expect(!DropDecision.accepts([.file(file)], optionKey: false, among: []))
+        #expect(DropDecision.accepts([.file(file)], optionKey: false, among: m))
+        #expect(DropDecision.accepts([.imageData(Data(), suggestedName: nil)], optionKey: false, among: m))
+        // ⌥ sends everything to the shelf, which does not take raw image data.
+        #expect(!DropDecision.accepts([.imageData(Data(), suggestedName: nil)], optionKey: true, among: m))
+    }
+
+    @Test func onlyPromisesSomeModuleWantsAreReceived() {
+        let convertOnly: [any NotchModule] = [modules()[0]]
+        #expect(DropDecision.acceptedPromises([["com.adobe.pdf"], ["public.jpeg"], ["public.png", "com.adobe.pdf"]], optionKey: false, among: convertOnly) == [1, 2])
+        #expect(DropDecision.acceptedPromises([["com.adobe.pdf"]], optionKey: false, among: convertOnly).isEmpty)
+        #expect(DropDecision.acceptedPromises([["com.adobe.pdf"]], optionKey: false, among: modules()) == [0])
+        #expect(DropDecision.acceptedPromises([], optionKey: false, among: modules()).isEmpty)
+    }
+
+    @Test func promiseFileCountDoesNotDependOnPrimedNames() {
+        #expect(FilePromises.expectedFileCount(fileNames: 0, fileTypes: 3) == 3)
+        #expect(FilePromises.expectedFileCount(fileNames: 2, fileTypes: 2) == 2)
+        #expect(FilePromises.expectedFileCount(fileNames: 0, fileTypes: 0) == 1)
     }
 
     /// Uses a private named pasteboard, never the general one.

@@ -50,6 +50,12 @@ struct PageEntry: Identifiable, Equatable {
 
 @MainActor
 enum PanelContent {
+    /// Modules not switched off in `CoreSettings.disabledModules`, in the order given.
+    static func enabled(_ modules: [any NotchModule], disabled: [String]) -> [any NotchModule] {
+        let off = Set(disabled)
+        return modules.filter { !off.contains($0.id.rawValue) }
+    }
+
     /// `.page` modules by `order`, ties keeping module order.
     static func pages(_ modules: [any NotchModule]) -> [PageEntry] {
         modules.enumerated()

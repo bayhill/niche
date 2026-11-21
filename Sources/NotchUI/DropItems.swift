@@ -20,17 +20,49 @@ public enum DropItems {
 
     /// Cheap stand-ins used to ask modules for a hint while the drag is still in flight.
     /// Promised files are represented by a placeholder URL with the promised type's extension.
-    public static func preview(fileURLs: [URL], promisedTypes: [String], hasImage: Bool, hasText: Bool) -> [DropItem] {
+    /// - Parameter promisedTypes: per file-promise receiver, the type identifiers it promises.
+    public static func preview(fileURLs: [URL], promisedTypes: [[String]], hasImage: Bool, hasText: Bool) -> [DropItem] {
         if !fileURLs.isEmpty { return fileURLs.map(DropItem.file) }
-        if !promisedTypes.isEmpty {
-            return promisedTypes.enumerated().map { index, identifier in
-                let ext = UTType(identifier)?.preferredFilenameExtension ?? "data"
-                return .file(URL(fileURLWithPath: NSTemporaryDirectory()).appending(path: "promised-\(index).\(ext)"))
-            }
+        let promised = promisedTypes.enumerated().flatMap { receiver, types in
+            types.enumerated().map { file, type in DropItem.file(promisePlaceholder(receiver: receiver, file: file, type: type)) }
         }
+        if !promised.isEmpty { return promised }
         if hasImage { return [.imageData(Data(), suggestedName: nil)] }
         if hasText { return [.text("")] }
         return []
+    }
+
+    /// A stand-in URL for a promised file that has not been written yet; only its extension is meaningful.
+    static func promisePlaceholder(receiver: Int, file: Int, type identifier: String) -> URL {
+        let ext = UTType(identifier)?.preferredFilenameExtension ?? "data"
+        return URL(fileURLWithPath: NSTemporaryDirectory()).appending(path: "notcher-promised-\(receiver)-\(file).\(ext)")
+    }
+}
+
+/// Whether anything would take a drag, decided before the drop target opens and again at drop time, so drags nobody
+/// wants (selected text, links, browser tabs) pass by untouched and are never swallowed.
+@MainActor
+public enum DropDecision {
+    /// True when at least one enabled module would receive at least one of the items.
+    public static func accepts(_ items: [DropItem], optionKey: Bool, among modules: [any NotchModule]) -> Bool {
+        !items.isEmpty && !DropRouter.route(DropPayload(items: items, optionKey: optionKey), among: modules).isEmpty
+    }
+
+    /// Which file-promise receivers (given each one's promised type identifiers) hold something a module accepts.
+    /// Only those are received, so nothing is written to disk for content no module will take.
+    public static func acceptedPromises(_ promisedTypes: [[String]], optionKey: Bool, among modules: [any NotchModule]) -> [Int] {
+        var owner: [URL: Int] = [:]
+        var items: [DropItem] = []
+        for (receiver, types) in promisedTypes.enumerated() {
+            for (file, type) in types.enumerated() {
+                let url = DropItems.promisePlaceholder(receiver: receiver, file: file, type: type)
+                owner[url] = receiver
+                items.append(.file(url))
+            }
+        }
+        let routed = DropRouter.route(DropPayload(items: items, optionKey: optionKey), among: modules)
+            .flatMap(\.payload.items).compactMap { $0.fileURL.flatMap { owner[$0] } }
+        return Array(Set(routed)).sorted()
     }
 }
 
@@ -60,7 +92,7 @@ enum DragPasteboard {
         let urls = fileURLs(pb)
         return DropItems.preview(
             fileURLs: urls,
-            promisedTypes: urls.isEmpty ? promises(pb).flatMap(\.fileTypes) : [],
+            promisedTypes: urls.isEmpty ? promises(pb).map(\.fileTypes) : [],
             hasImage: pb.availableType(from: [.png, .tiff]) != nil,
             hasText: pb.availableType(from: [.string]) != nil
         )
@@ -88,21 +120,27 @@ enum FilePromises {
         return q
     }()
 
+    /// Files a receiver will deliver. `fileNames` can be empty until the receiver is primed, so the promised types
+    /// count too; at least one.
+    static func expectedFileCount(fileNames: Int, fileTypes: Int) -> Int { max(1, fileNames, fileTypes) }
+
+    /// Receives every receiver concurrently and returns what arrived, waiting at most `timeout` overall.
     static func receive(_ receivers: [NSFilePromiseReceiver], into directory: URL, timeout: Duration = .seconds(60)) async -> [URL] {
+        guard !receivers.isEmpty else { return [] }
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        var urls: [URL] = []
-        for receiver in receivers {
-            let collector = PromiseCollector()
-            urls += await withCheckedContinuation { (continuation: CheckedContinuation<[URL], Never>) in
-                collector.begin(continuation)
+        let collector = PromiseCollector()
+        return await withCheckedContinuation { (continuation: CheckedContinuation<[URL], Never>) in
+            collector.begin(continuation)
+            var expected = 0
+            for receiver in receivers {
                 receiver.receivePromisedFiles(atDestination: directory, options: [:], operationQueue: queue) { url, error in
                     collector.add(error == nil ? url : nil)
                 }
-                collector.expect(max(1, receiver.fileNames.count))
-                Task { try? await Task.sleep(for: timeout); collector.finish() }
+                expected += expectedFileCount(fileNames: receiver.fileNames.count, fileTypes: receiver.fileTypes.count)
             }
+            collector.expect(expected)
+            Task { try? await Task.sleep(for: timeout); collector.finish() }
         }
-        return urls
     }
 }
 

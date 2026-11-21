@@ -11,8 +11,14 @@ public struct NotchLayout: Sendable, Equatable {
     public var notchRect: CGRect
     /// The visible shape, ears included, in window coordinates.
     public var shapeRect: CGRect
-    /// The visible shape in global coordinates. The window takes mouse events only inside this rect.
+    /// The visible shape in global coordinates.
+    public var visibleRect: CGRect
+    /// Where the window takes mouse events (global). Everything else passes through to the apps and menu bar below.
+    /// Activity wings are visual only (the notch itself is interactive), and an invisible closed virtual notch on a
+    /// notchless display takes nothing: `.null`.
     public var hitRect: CGRect
+    /// 0 hides the surface entirely (the closed state of a virtual notch on a notchless display).
+    public var surfaceOpacity: Double
     public var topRadius: CGFloat
     public var bottomRadius: CGFloat
     /// 0 = solid black, 1 = full Liquid Glass below the band.
@@ -28,7 +34,7 @@ public struct NotchLayout: Sendable, Equatable {
     public var centerOffset: CGFloat { shapeRect.midX - windowFrame.width / 2 }
 
     /// Hit test with inclusive edges, so the pointer pinned against the top of the screen still counts.
-    public func hits(_ point: CGPoint) -> Bool { NotchGeometry.contains(hitRect, point) }
+    public func hits(_ point: CGPoint) -> Bool { !hitRect.isNull && NotchGeometry.contains(hitRect, point) }
 }
 
 public enum NotchGeometry {
@@ -88,18 +94,26 @@ public enum NotchGeometry {
         let size = shapeSize(state, notch: notch.size, hasActivity: hasActivity)
         let r = radii(state)
         let top = metrics.frame.maxY
-        let hit = CGRect(x: notch.midX - size.width / 2, y: top - size.height, width: size.width, height: size.height)
-        let shape = CGRect(x: hit.minX - window.minX, y: window.maxY - hit.maxY, width: size.width, height: size.height)
+        let visible = CGRect(x: notch.midX - size.width / 2, y: top - size.height, width: size.width, height: size.height)
+        let shape = CGRect(x: visible.minX - window.minX, y: window.maxY - visible.maxY, width: size.width, height: size.height)
+        // Without a hardware notch the closed pill would sit over real menu-bar items, so it is not drawn and claims
+        // nothing; the notch there opens by hotkey, the app's menu-bar item or a drag. `--simulate-notch` keeps it.
+        let passive = state == .closed && !metrics.hasNotch && simulatedNotch == nil
+        let hit: CGRect = switch state {
+        case .closed: passive ? .null : notch
+        case .activity: notch
+        case .hover, .drop, .expanded: visible
+        }
         return NotchLayout(
-            state: state, windowFrame: window, notchRect: notch, shapeRect: shape, hitRect: hit,
-            topRadius: r.top, bottomRadius: r.bottom, glassAmount: state.isOpen ? 1 : 0
+            state: state, windowFrame: window, notchRect: notch, shapeRect: shape, visibleRect: visible, hitRect: hit,
+            surfaceOpacity: passive ? 0 : 1, topRadius: r.top, bottomRadius: r.bottom, glassAmount: state.isOpen ? 1 : 0
         )
     }
 
     /// Whether a file drag at `point` should show (or keep showing) the drop target.
     public static func isNearForDrop(_ point: CGPoint, layout: NotchLayout) -> Bool {
         if distance(from: point, to: layout.notchRect) <= dropProximity { return true }
-        return layout.state == .drop && contains(layout.hitRect.insetBy(dx: -dropHysteresis, dy: -dropHysteresis), point)
+        return layout.state == .drop && contains(layout.visibleRect.insetBy(dx: -dropHysteresis, dy: -dropHysteresis), point)
     }
 
     /// Euclidean distance from a point to a rect (0 inside).

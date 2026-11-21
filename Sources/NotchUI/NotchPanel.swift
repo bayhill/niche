@@ -21,6 +21,8 @@ final class NotchPanel: NSPanel {
         animationBehavior = .none
         acceptsMouseMovedEvents = true
         ignoresMouseEvents = true
+        // Stay up when the app is hidden ("Hide Others"); the controller also unhides on didHide.
+        canHide = false
     }
 
     // Key only for text input inside a module (becomesKeyOnlyIfNeeded); never main.
@@ -37,8 +39,9 @@ final class NotchHostingView: NSHostingView<NotchRootView> {
 
 @MainActor
 protocol NotchDropHandling: AnyObject {
-    func dragUpdated(at screenPoint: CGPoint) -> NSDragOperation
+    func dragUpdated(at screenPoint: CGPoint, pasteboard: NSPasteboard) -> NSDragOperation
     func dragExited()
+    func canAcceptDrop() -> Bool
     func performDrop(_ pasteboard: NSPasteboard) -> Bool
 }
 
@@ -59,17 +62,17 @@ final class NotchContainerView: NSView {
     }
 
     override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
-        dropHandler?.dragUpdated(at: screenPoint(sender)) ?? []
+        dropHandler?.dragUpdated(at: screenPoint(sender), pasteboard: sender.draggingPasteboard) ?? []
     }
 
     override func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
-        dropHandler?.dragUpdated(at: screenPoint(sender)) ?? []
+        dropHandler?.dragUpdated(at: screenPoint(sender), pasteboard: sender.draggingPasteboard) ?? []
     }
 
     override func draggingExited(_ sender: (any NSDraggingInfo)?) { dropHandler?.dragExited() }
 
     override func prepareForDragOperation(_ sender: any NSDraggingInfo) -> Bool {
-        dropHandler?.dragUpdated(at: screenPoint(sender)) != []
+        dropHandler?.canAcceptDrop() ?? false
     }
 
     override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
