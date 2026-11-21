@@ -289,7 +289,7 @@ private struct BandView: View {
         let pages = PanelContent.pages(model.modules)
         HStack(spacing: 0) {
             HStack(spacing: Tokens.Spacing.xs) {
-                BandButton(symbol: "house.fill", label: "Home", selected: model.page == nil, selection: selection) {
+                BandButton(symbol: "square.grid.2x2", label: "Home", selected: model.page == nil, selection: selection) {
                     model.onSelectPage(nil)
                 }
                 .motionAppear(0)
@@ -308,7 +308,7 @@ private struct BandView: View {
 
             HStack(spacing: Tokens.Spacing.xs) {
                 Spacer(minLength: 0)
-                BandButton(symbol: "gearshape.fill", label: "Settings", selected: false, selection: selection) {
+                BandButton(symbol: "slider.horizontal.3", label: "Settings", selected: false, selection: selection) {
                     model.onOpenSettings()
                 }
                 .motionAppear(pages.count + 1)
