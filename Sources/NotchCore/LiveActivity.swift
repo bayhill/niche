@@ -26,7 +26,8 @@ public struct LiveActivity: Identifiable, Equatable, Sendable {
     /// Right wing, optional. Keep text to about 6 characters.
     public var trailing: ActivityGlyph?
     /// Optional line of text in the left wing, between the leading glyph and the notch (a track title).
-    /// One line, primary colour, truncated with an ellipsis. The wings widen to fit, up to `PanelLayout.wingMaxWidth`.
+    /// One line, primary colour, truncated with an ellipsis. Each wing widens to fit its own text, up to
+    /// `PanelLayout.wingMaxWidth` and the free space in the menu bar.
     public var leadingText: String?
     /// Optional line of text in the right wing, between the notch and the trailing glyph (an artist).
     /// One line, secondary colour, truncated with an ellipsis.

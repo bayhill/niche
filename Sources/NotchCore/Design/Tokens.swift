@@ -112,9 +112,11 @@ public extension View {
 public enum PanelLayout {
     /// Width of each live-activity wing beside the closed notch when it holds only a glyph.
     public static let wingWidth: CGFloat = 40
-    /// Widest a wing may grow when the activity carries `leadingText`/`trailingText`. Both wings take the same
-    /// width (that of the longer side) so the notch stays symmetric.
-    public static let wingMaxWidth: CGFloat = 150
+    /// Widest a wing may grow when the activity carries `leadingText`/`trailingText`. Each wing sizes to its own
+    /// content, so the two may differ; the notch layer also keeps the right wing clear of menu-bar status items.
+    public static let wingMaxWidth: CGFloat = 320
+    /// Gap kept between a wing's outer edge and the nearest menu-bar status item.
+    public static let wingClearance: CGFloat = 10
     /// How much the notch swells on hover: slightly wider, and tall enough below the hardware notch for the
     /// one-line hover hint ("Click to expand Notcher").
     public static let hoverGrowth = CGSize(width: 16, height: 22)

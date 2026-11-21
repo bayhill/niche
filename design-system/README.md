@@ -31,7 +31,7 @@ commit and still describe the modules as placeholders; that part is out of date.
   leading slot on `ResultRow`, a compact `EmptyState`, `StatusDot(size:)`, tinted wing text, `Format.playback`,
   `Format.age`, `Tokens.Colors.accentWash` and `accentGlass`.
 - **Extended after the design:** a live activity may carry one line of text per wing (`leadingText`, `trailingText`;
-  Now Playing shows title and artist), widening both wings up to `PanelLayout.wingMaxWidth` and truncating.
+  Now Playing shows title and artist), each wing widening to fit its own text up to `PanelLayout.wingMaxWidth`, staying clear of status items, and truncating.
 - **Hover hint:** hovering the closed notch swells it by `PanelLayout.hoverGrowth` and shows "Click to expand
   Notcher" below the hardware notch, growing with the swell.
 - **Deliberate differences:** the Clipboard row scrolls horizontally (there is no search yet); a drag over the open
