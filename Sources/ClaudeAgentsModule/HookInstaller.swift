@@ -272,7 +272,7 @@ public struct HookInstaller: HookInstalling {
             let resolved = PlannedCommand(executable: cli, arguments: command.arguments)
             let result = await run(resolved, log: &log)
             guard result?.status == 0 else {
-                return InstallResult(succeeded: false, message: "Claude Code reported an error. Nothing else was changed after it.", log: log)
+                return InstallResult(succeeded: false, message: "Claude Code reported an error, so the remaining steps were skipped. Check the details below.", log: log)
             }
         }
         do {

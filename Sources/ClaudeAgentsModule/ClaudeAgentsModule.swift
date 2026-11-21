@@ -14,11 +14,11 @@ public final class ClaudeAgentsModule: NotchModule {
     public let id: ModuleID = .claudeAgents
     public let title = "Claude"
     public let symbol = "sparkles"
-    public let placement: PanelPlacement = .dashboard(.trailing)
+    public let placement: PanelPlacement = .dashboard(.leadingBottom)
     public var requirements: [PermissionRequirement] {
         [PermissionRequirement(
             .claudeHooks, optional: true,
-            rationale: "Lets Notcher tell you the moment a Claude Code session is waiting for your permission or input."
+            rationale: "Shows the moment a Claude Code session needs permission or input."
         )]
     }
 
@@ -30,8 +30,8 @@ public final class ClaudeAgentsModule: NotchModule {
     public private(set) var lastResult: InstallResult?
     public private(set) var isChangingHooks = false
 
-    /// The card shows at most this many rows.
-    public static let visibleLimit = 4
+    /// The card shows at most this many rows; the rest are counted as "+N".
+    public static let visibleLimit = ClaudeAgentsModuleLayout.visibleRows
 
     @ObservationIgnored private let directories: AppDirectories?
     @ObservationIgnored private let bundledPlugin: URL?
@@ -71,13 +71,14 @@ public final class ClaudeAgentsModule: NotchModule {
         self.pollInterval = pollInterval; self.isSample = false
     }
 
-    private init(sampleSessions: [ClaudeSession], now: Date) {
+    /// Fixed sessions and install status, touching nothing on the system. Backs `sample()` and snapshots.
+    init(sampleSessions: [ClaudeSession], now: Date, hookStatus: HookInstallStatus = .notInstalled) {
         directories = nil; bundledPlugin = nil; clock = { Date() }; inspector = SystemProcessInspector()
         runner = SystemProcessRunner(); pollInterval = .seconds(3); isSample = true
         installer = SampleHookInstaller()
         sessions = SessionReducer.ordered(sampleSessions)
         liveActivity = ClaudeActivity.make(for: sessions, now: now)
-        hookStatus = .notInstalled
+        self.hookStatus = hookStatus
         plan = SampleHookInstaller().plan()
     }
 
@@ -285,6 +286,6 @@ struct SampleHookInstaller: HookInstalling {
             ])
         )
     }
-    func install() async -> InstallResult { InstallResult(succeeded: false, message: "Sample data: nothing was installed.") }
-    func uninstall() async -> InstallResult { InstallResult(succeeded: false, message: "Sample data: nothing was changed.") }
+    func install() async -> InstallResult { InstallResult(succeeded: false, message: "Sample data. Nothing was installed.") }
+    func uninstall() async -> InstallResult { InstallResult(succeeded: false, message: "Sample data. Nothing was changed.") }
 }

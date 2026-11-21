@@ -17,8 +17,9 @@ final class RecordingActivator: SessionActivating {
     @Test func shapeMatchesTheContract() {
         let m = ClaudeAgentsModule.sample()
         #expect(m.id == .claudeAgents)
-        #expect(m.placement == .dashboard(.trailing))
-        #expect(PanelLayout.cardSize(for: .trailing) == CGSize(width: 210, height: 184))
+        #expect(m.placement == .dashboard(.leadingBottom))
+        #expect(PanelLayout.cardSize(for: .leadingBottom) == CGSize(width: 210, height: 87))
+        #expect(ClaudeAgentsModule.visibleLimit == 2)
         #expect(m.requirements == [PermissionRequirement(.claudeHooks, optional: true, rationale: m.requirements[0].rationale)])
         #expect(m.settingsView() != nil)
         #expect(m.dropAcceptance(for: .text("x")) == .reject)
@@ -35,6 +36,8 @@ final class RecordingActivator: SessionActivating {
         #expect(m.sessions.prefix(2).allSatisfy { $0.state.needsUser })
         #expect(m.liveActivity?.priority == .attention)
         #expect(m.liveActivity?.trailing == .text("2"))
+        let card = SessionCardContent.make(sessions: m.sessions, hookStatus: m.hookStatus)
+        #expect(card.rows.count == 2 && card.hiddenCount == 3 && card.showsEnableAlerts)
     }
 
     @Test func liveModuleReadsRegistryAndSpoolFromInjectedDirectories() async throws {
@@ -85,18 +88,34 @@ final class RecordingActivator: SessionActivating {
         #expect(await runner.calls.isEmpty, "starting never installs anything")
     }
 
-    @Test func cardFitsFourRowsInItsFrame() throws {
-        // 16 pt header + 4 pt gap + 4 rows of 30 pt with 2 pt gaps, inside 12 pt card padding.
-        let inner = PanelLayout.cardSize(for: .trailing).height - 2 * Tokens.Spacing.m
-        #expect(16 + Tokens.Spacing.xs + 4 * 30 + 3 * 2 <= inner)
+    @Test func cardFitsTwoRowsInItsFrame() {
+        // Two rows of a 12 pt body line over an 11 pt caption line (about 28 pt each) with a 4 pt gap,
+        // inside the 12 pt card padding.
+        let inner = PanelLayout.cardSize(for: .leadingBottom).height - 2 * Tokens.Spacing.m
+        #expect(2 * 28 + Tokens.Spacing.xs <= inner)
     }
 
     @Test func snapshots() throws {
         let out = FileManager.default.temporaryDirectory.appending(path: "notcher-claude-snapshots", directoryHint: .isDirectory)
         let sample = ClaudeAgentsModule.sample()
-        let card = try ViewSnapshot.write(module: sample, to: out.appending(path: "card-sample.png"))
-        let empty = ClaudeAgentsModule(directories: nil, bundledPlugin: nil)
-        try ViewSnapshot.write(module: empty, to: out.appending(path: "card-empty.png"))
+        let card = try ViewSnapshot.write(module: sample, to: out.appending(path: "card-many-off.png"))
+        let now = Date()
+        func s(_ id: String, _ state: SessionState, ago: TimeInterval) -> ClaudeSession {
+            ClaudeSession(id: id, pid: 1, cwd: "/Users/dev/projects/\(id)", title: id, entrypoint: .cli, state: state,
+                          since: now.addingTimeInterval(-ago), lastEvent: now.addingTimeInterval(-ago))
+        }
+        let cases: [(String, [ClaudeSession], HookInstallStatus)] = [
+            ("card-two-need-user", [s("notcher", .needsPermission(detail: "Bash"), ago: 95), s("fix-login-redirect-after-oauth", .needsInput(detail: nil), ago: 400)], .installed),
+            ("card-one-working", [s("lanternfly", .working, ago: 380)], .installed),
+            ("card-many", [s("notcher", .needsPermission(detail: "Bash"), ago: 95), s("lanternfly", .working, ago: 380),
+                           s("garden-clock", .finished(at: now.addingTimeInterval(-40)), ago: 40), s("dotfiles", .idle(since: now), ago: 3900)], .installed),
+            ("card-empty", [], .notInstalled),
+            ("card-hooks-off", [s("lanternfly", .working, ago: 380), s("dotfiles", .idle(since: now), ago: 3900)], .notInstalled),
+        ]
+        for (name, sessions, status) in cases {
+            let module = ClaudeAgentsModule(sampleSessions: sessions, now: now, hookStatus: status)
+            try ViewSnapshot.write(module: module, to: out.appending(path: "\(name).png"))
+        }
         // Forms are AppKit-backed and come out blank through ImageRenderer; cache an off-screen hosting view instead.
         let settings = out.appending(path: "settings-sample.png")
         let host = NSHostingView(rootView: try #require(sample.settingsView()).frame(width: 560, height: 1300))

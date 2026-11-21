@@ -25,7 +25,7 @@ public enum SessionPresentation {
     public static func stateLine(for state: SessionState) -> String {
         switch state {
         case .needsPermission: "Needs permission"
-        case .needsInput: "Waiting for you"
+        case .needsInput: "Needs input"
         case .working: "Working"
         case .finished: "Done"
         case .idle: "Idle"
@@ -36,20 +36,20 @@ public enum SessionPresentation {
     public static func detailLine(for state: SessionState) -> String {
         switch state {
         case .needsPermission(let tool?): "Asking permission to use \(tool)"
-        case .needsInput(let detail?): "Waiting for you: \(detail)"
+        case .needsInput(let detail?): "Needs input: \(detail)"
         default: stateLine(for: state)
         }
     }
 
-    /// Time in the current state: "now", "45s", "12m", "1h 5m".
+    /// Time in the current state: "now", "4m", "1h", "3d".
     public static func elapsed(since: Date, now: Date) -> String {
-        Format.countdown(seconds: max(0, now.timeIntervalSince(since)))
+        Format.age(seconds: now.timeIntervalSince(since))
     }
 
-    /// A title cut to fit a wing (about six characters).
+    /// A title cut to fit a wing: at most six characters, the last an ellipsis when shortened.
     public static func wingTitle(_ title: String) -> String {
         let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        return t.count <= 7 ? t : String(t.prefix(6)) + "\u{2026}"
+        return t.count <= 6 ? t : String(t.prefix(5)) + "\u{2026}"
     }
 }
 
@@ -69,7 +69,7 @@ public enum ClaudeActivity {
             let trailing = waiting.count == 1 ? SessionPresentation.wingTitle(first.title) : "\(waiting.count)"
             let label = waiting.count == 1
                 ? "\(first.title): \(SessionPresentation.stateLine(for: first.state))"
-                : "\(waiting.count) Claude sessions need you"
+                : "\(waiting.count) Claude sessions need attention"
             return LiveActivity(
                 id: "claudeAgents.attention", module: .claudeAgents, priority: .attention,
                 leading: .symbol(symbol, tint: .warning, pulse: true), trailing: .text(trailing),
@@ -86,9 +86,31 @@ public enum ClaudeActivity {
                 leading: .symbol(SessionPresentation.symbol(for: .finished(at: at)), tint: .success),
                 trailing: .text(done.count == 1 ? SessionPresentation.wingTitle(session.title) : "\(done.count)"),
                 expiresAt: at.addingTimeInterval(doneDuration), updatedAt: at,
-                accessibilityLabel: "\(session.title) is done"
+                accessibilityLabel: "\(session.title): done"
             )
         }
         return nil
     }
+}
+
+/// What the half-height card shows: the most important sessions, how many are left out, and whether the quiet
+/// "Enable alerts" affordance appears (hooks not installed and at least one session running).
+public struct SessionCardContent: Sendable, Equatable {
+    public var rows: [ClaudeSession]
+    public var hiddenCount: Int
+    public var showsEnableAlerts: Bool
+
+    public static func make(sessions: [ClaudeSession], hookStatus: HookInstallStatus, limit: Int = ClaudeAgentsModuleLayout.visibleRows) -> SessionCardContent {
+        let ordered = SessionReducer.ordered(sessions)
+        let rows = Array(ordered.prefix(max(0, limit)))
+        return SessionCardContent(
+            rows: rows, hiddenCount: ordered.count - rows.count,
+            showsEnableAlerts: hookStatus != .installed && !ordered.isEmpty
+        )
+    }
+}
+
+public enum ClaudeAgentsModuleLayout {
+    /// Rows that fit the 210 × 87 `leadingBottom` card.
+    public static let visibleRows = 2
 }

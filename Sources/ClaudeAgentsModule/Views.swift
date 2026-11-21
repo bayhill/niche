@@ -1,72 +1,99 @@
 import NotchCore
 import SwiftUI
 
-/// The dashboard card: up to four sessions, most urgent first. Clicking a row brings its host app forward.
+/// The half-height dashboard card (210 × 87): the two most important sessions as two-line rows, with a "+N" count
+/// and, while alerts are off, one quiet bell beside the second row. No header: the rows are the content.
 struct ClaudeCard: View {
     let module: ClaudeAgentsModule
 
     var body: some View {
-        let sessions = module.sessions
-        let visible = Array(sessions.prefix(ClaudeAgentsModule.visibleLimit))
-        let attention = sessions.contains { $0.state.needsUser }
-        GlassCard(spacing: Tokens.Spacing.xs) {
-            SectionHeader("Claude", symbol: "sparkles") {
-                HStack(spacing: Tokens.Spacing.s) {
-                    if module.hookStatus != .installed {
-                        Button(action: module.openAlertSettings) {
-                            Text("Enable alerts").font(NotchTextStyle.caption.font).foregroundStyle(Tokens.Colors.accent)
-                        }
-                        .buttonStyle(.plain)
-                        .help("Get told when a session needs your permission or input")
-                    }
-                    if sessions.count > visible.count {
-                        Text("+\(sessions.count - visible.count)").notchStyle(.caption)
-                    }
-                    if attention {
-                        StatusDot(.warning, pulsing: true).notchHero(.claudeAgents)
-                    }
+        let content = SessionCardContent.make(sessions: module.sessions, hookStatus: module.hookStatus)
+        GlassCard(spacing: 0) {
+            if content.rows.isEmpty {
+                // One line: the 63 pt of content height is too short for EmptyState's stacked symbol and title.
+                HStack(spacing: Tokens.Spacing.xs) {
+                    Image(systemName: "sparkles").font(NotchTextStyle.caption.font).foregroundStyle(Tokens.Colors.textTertiary)
+                    Text("No sessions running").notchStyle(.caption).lineLimit(1)
                 }
-            }
-            if visible.isEmpty {
-                EmptyState(symbol: "sparkles", title: "No Claude sessions", message: "Sessions you start appear here")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityElement(children: .combine)
             } else {
-                TimelineView(.periodic(from: .now, by: 1)) { context in
-                    VStack(alignment: .leading, spacing: 2) {
-                        ForEach(Array(visible.enumerated()), id: \.element.id) { index, session in
-                            SessionRow(session: session, now: context.date) { module.activate(session) }
-                                .motionAppear(index)
+                TimelineView(.periodic(from: .now, by: 15)) { context in
+                    VStack(alignment: .leading, spacing: Tokens.Spacing.xs) {
+                        ForEach(Array(content.rows.enumerated()), id: \.element.id) { index, session in
+                            SessionRow(session: session, now: context.date, isHero: index == 0) { module.activate(session) }
+                                .transition(.opacity)
                         }
                     }
+                    .motion(Motion.morph, value: content.rows)
                 }
+                .overlay(alignment: .bottomTrailing) { CornerCluster(content: content, module: module) }
                 Spacer(minLength: 0)
             }
         }
     }
 }
 
+/// "+N" and the alert bell, sitting on the second row's state line where that line leaves room.
+private struct CornerCluster: View {
+    let content: SessionCardContent
+    let module: ClaudeAgentsModule
+
+    var body: some View {
+        HStack(spacing: Tokens.Spacing.xs) {
+            if content.hiddenCount > 0 {
+                Text("+\(content.hiddenCount)").notchStyle(.caption).monospacedDigit()
+                    .contentTransition(.numericText())
+                    .accessibilityLabel("\(content.hiddenCount) more sessions")
+            }
+            if content.showsEnableAlerts {
+                GlassIconButton("bell.slash", label: "Enable alerts", kind: .plain, size: 18, tint: .secondary, action: module.openAlertSettings)
+            }
+        }
+        .motion(Motion.morph, value: content.hiddenCount)
+    }
+}
+
 private struct SessionRow: View {
     let session: ClaudeSession
     let now: Date
+    let isHero: Bool
     let action: () -> Void
 
     var body: some View {
         let state = session.state
         Button(action: action) {
-            ResultRow(
-                symbol: SessionPresentation.symbol(for: state), symbolTint: SessionPresentation.tint(for: state),
-                title: session.title, detail: SessionPresentation.stateLine(for: state),
-                trailing: SessionPresentation.elapsed(since: session.since, now: now),
-                trailingTint: state.needsUser ? .warning : .secondary
-            )
-            .symbolEffect(.pulse, isActive: state.needsUser)
+            HStack(alignment: .firstTextBaseline, spacing: Tokens.Spacing.s) {
+                dot
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(alignment: .firstTextBaseline, spacing: Tokens.Spacing.xs) {
+                        Text(session.title).notchStyle(.body).lineLimit(1).truncationMode(.tail)
+                        Spacer(minLength: Tokens.Spacing.xs)
+                        Text(SessionPresentation.elapsed(since: session.since, now: now))
+                            .notchStyle(.caption).monospacedDigit().lineLimit(1).fixedSize()
+                            .contentTransition(.numericText())
+                    }
+                    Text(SessionPresentation.stateLine(for: state)).notchStyle(.caption).lineLimit(1)
+                        .contentTransition(.opacity)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .buttonStyle(RowButtonStyle())
-        // RowButtonStyle pads its hover fill; let the fill bleed into the card padding so rows keep their 30 pt.
+        // RowButtonStyle pads its hover fill; let the fill bleed into the card padding so two rows fit in 63 pt.
         .padding(.horizontal, -6)
         .padding(.vertical, -4)
         .disabled(session.pid == nil)
-        .help("\(SessionPresentation.detailLine(for: state))\n\(session.cwd)")
+        .motion(Motion.morph, value: state)
+        .accessibilityElement(children: .combine)
         .accessibilityLabel("\(session.title), \(SessionPresentation.detailLine(for: state))")
+        .accessibilityHint(session.pid == nil ? "" : "Brings the app running this session to the front")
+    }
+
+    @ViewBuilder private var dot: some View {
+        let status = StatusDot(SessionPresentation.tint(for: session.state), pulsing: session.state.needsUser)
+            .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 3 }
+        if isHero && session.state.needsUser { status.notchHero(.claudeAgents) } else { status }
     }
 }
 
@@ -88,15 +115,15 @@ struct ClaudeSettingsView: View {
     var body: some View {
         Form {
             Section("Claude Code alerts") {
-                Text("Notcher already sees which Claude Code sessions are running. Turn on alerts to also learn the moment a session is waiting for your permission or an answer, or has just finished.")
-                Text("This installs a small Claude Code plugin, notcher-bridge, that hands each session event to Notcher. It sends nothing over the network, prints nothing into your sessions, and does nothing while alerts are off.")
+                Text("Notcher shows which Claude Code sessions are running. Alerts add the moment a session needs permission or input, or finishes, beside the closed notch.")
+                Text("Install adds a small Claude Code plugin, notcher-bridge, that hands each session event to Notcher. It sends nothing over the network, prints nothing into sessions and stays inactive while alerts are off.")
                     .foregroundStyle(.secondary)
                 LabeledContent("Status") {
                     Label(statusText, systemImage: statusSymbol).symbolRenderingMode(.multicolor)
                 }
             }
             if let plan = module.plan {
-                Section(module.hookStatus == .installed ? "Installed with" : "What Install does") {
+                Section(module.hookStatus == .installed ? "Installed with" : "What install does") {
                     ForEach(Array(plan.installSteps.enumerated()), id: \.offset) { i, step in
                         Text("\(i + 1). \(step)").textSelection(.enabled)
                     }
@@ -111,7 +138,7 @@ struct ClaudeSettingsView: View {
                 Section("~/.claude/settings.json") {
                     JSONPreview(title: "Before", json: plan.settingsBefore)
                     JSONPreview(title: "After", json: plan.settingsAfter)
-                    Text("Only these two keys change. A timestamped backup is saved first. Open sessions pick the plugin up after /reload-plugins or a restart.")
+                    Text("Only these two keys change, after a timestamped backup. Run /reload-plugins or restart open sessions to pick up the plugin.")
                         .foregroundStyle(.secondary)
                 }
                 Section("Uninstall runs") {
@@ -151,7 +178,7 @@ struct ClaudeSettingsView: View {
         switch module.hookStatus {
         case .installed: "On"
         case .notInstalled: "Off"
-        case .cliNotFound: "Off: Claude Code's command-line tool was not found"
+        case .cliNotFound: "Off. Install Claude Code to turn alerts on"
         }
     }
 

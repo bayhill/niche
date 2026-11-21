@@ -209,19 +209,22 @@ import Testing
         let one = try #require(ClaudeActivity.make(for: [session("a", "notcher", .needsPermission(detail: "Bash"), since: -20), session("b", "x", .working, since: -5)], now: now))
         #expect(one.priority == .attention)
         #expect(one.leading == .symbol("hand.raised.fill", tint: .warning, pulse: true))
-        #expect(one.trailing == .text("notcher"))
+        #expect(one.trailing == .text("notch\u{2026}"))
+        #expect(one.accessibilityLabel == "notcher: Needs permission")
         #expect(one.module == .claudeAgents)
 
         let two = try #require(ClaudeActivity.make(for: [session("a", "lanternfly", .needsPermission(detail: nil), since: -20), session("b", "y", .needsInput(detail: nil), since: -5)], now: now))
         #expect(two.trailing == .text("2"))
+        #expect(two.accessibilityLabel == "2 Claude sessions need attention")
         #expect(two.leading == .symbol("questionmark.bubble.fill", tint: .warning, pulse: true))
-        #expect(ClaudeActivity.make(for: [session("a", "lanternfly", .needsInput(detail: nil), since: -1)], now: now)?.trailing == .text("lanter\u{2026}"))
+        #expect(ClaudeActivity.make(for: [session("a", "lanternfly", .needsInput(detail: nil), since: -1)], now: now)?.trailing == .text("lante\u{2026}"))
     }
 
     @Test func shortDoneThenNothing() throws {
         let done = [session("a", "demo", .finished(at: now.addingTimeInterval(-2)), since: -2), session("b", "x", .idle(since: now), since: 0)]
         let activity = try #require(ClaudeActivity.make(for: done, now: now))
         #expect(activity.priority == .passive)
+        #expect(activity.accessibilityLabel == "demo: done" && activity.trailing == .text("demo"))
         #expect(activity.expiresAt == now.addingTimeInterval(-2 + ClaudeActivity.doneDuration))
         #expect(ClaudeActivity.make(for: done, now: now.addingTimeInterval(ClaudeActivity.doneDuration)) == nil)
         #expect(ClaudeActivity.make(for: [session("a", "demo", .working, since: -60), session("b", "x", .idle(since: now), since: 0)], now: now) == nil,
@@ -231,11 +234,50 @@ import Testing
     @Test func presentationLines() {
         #expect(SessionPresentation.stateLine(for: .needsPermission(detail: "Bash")) == "Needs permission")
         #expect(SessionPresentation.detailLine(for: .needsPermission(detail: "Bash")) == "Asking permission to use Bash")
-        #expect(SessionPresentation.stateLine(for: .needsInput(detail: "x")) == "Waiting for you")
+        #expect(SessionPresentation.stateLine(for: .needsInput(detail: "x")) == "Needs input")
+        #expect(SessionPresentation.detailLine(for: .needsInput(detail: "pick a database")) == "Needs input: pick a database")
+        #expect(SessionPresentation.stateLine(for: .idle(since: now)) == "Idle")
         #expect(SessionPresentation.stateLine(for: .working) == "Working")
         #expect(SessionPresentation.stateLine(for: .finished(at: now)) == "Done")
-        #expect(SessionPresentation.elapsed(since: now.addingTimeInterval(-125), now: now) == "3m")
-        #expect(SessionPresentation.elapsed(since: now.addingTimeInterval(-45), now: now) == "45s")
+        #expect(SessionPresentation.elapsed(since: now.addingTimeInterval(-125), now: now) == "2m")
+        #expect(SessionPresentation.elapsed(since: now.addingTimeInterval(-45), now: now) == "now")
+        #expect(SessionPresentation.elapsed(since: now.addingTimeInterval(-7300), now: now) == "2h")
+        #expect(SessionPresentation.wingTitle("notcher") == "notch\u{2026}" && SessionPresentation.wingTitle("demo") == "demo")
         #expect(SessionPresentation.tint(for: .needsInput(detail: nil)) == .warning)
+    }
+}
+
+@Suite struct CardContentTests {
+    let now = Fixture.t0
+    func session(_ id: String, _ state: SessionState, since: TimeInterval) -> ClaudeSession {
+        ClaudeSession(id: id, pid: 1, cwd: "/Users/dev/\(id)", title: id, entrypoint: .cli, state: state,
+                      since: now.addingTimeInterval(since), lastEvent: now.addingTimeInterval(since))
+    }
+
+    @Test func topTwoAreTheMostImportant() {
+        let all = [
+            session("idle", .idle(since: now), since: -10),
+            session("done", .finished(at: now.addingTimeInterval(-5)), since: -5),
+            session("work", .working, since: -300),
+            session("ask", .needsInput(detail: nil), since: -60),
+            session("perm", .needsPermission(detail: "Bash"), since: -20),
+        ]
+        let c = SessionCardContent.make(sessions: all, hookStatus: .installed)
+        #expect(c.rows.map(\.id) == ["perm", "ask"], "needs the user first, newest change first")
+        #expect(c.hiddenCount == 3)
+        let calm = SessionCardContent.make(sessions: Array(all.prefix(3)), hookStatus: .installed)
+        #expect(calm.rows.map(\.id) == ["work", "done"], "then working, then done/idle")
+        #expect(calm.hiddenCount == 1)
+        let two = SessionCardContent.make(sessions: Array(all.prefix(2)), hookStatus: .installed)
+        #expect(two.hiddenCount == 0 && two.rows.count == 2)
+    }
+
+    @Test func enableAlertsOnlyWhenOffAndSomethingRuns() {
+        let one = [session("work", .working, since: 0)]
+        #expect(SessionCardContent.make(sessions: one, hookStatus: .notInstalled).showsEnableAlerts)
+        #expect(SessionCardContent.make(sessions: one, hookStatus: .cliNotFound).showsEnableAlerts)
+        #expect(!SessionCardContent.make(sessions: one, hookStatus: .installed).showsEnableAlerts)
+        #expect(!SessionCardContent.make(sessions: [], hookStatus: .notInstalled).showsEnableAlerts)
+        #expect(SessionCardContent.make(sessions: [], hookStatus: .notInstalled).rows.isEmpty)
     }
 }
