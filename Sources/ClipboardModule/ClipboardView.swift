@@ -102,6 +102,8 @@ private struct CardRow<Content: View>: View {
         let row = HStack(alignment: .top, spacing: Tokens.Spacing.s) { content }
         if scrolls {
             ScrollView(.horizontal, showsIndicators: false) { row.scrollTargetLayout() }
+                // One point of room so the first and last cards' outlines are not cut by the scroll bounds.
+                .contentMargins(.horizontal, 1, for: .scrollContent)
                 .scrollTargetBehavior(.viewAligned)
                 .scrollEdgeEffectStyle(.soft, for: .horizontal)
         } else {
