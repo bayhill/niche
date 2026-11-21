@@ -75,9 +75,14 @@ public struct GlassCard<Content: View>: View {
                 ZStack {
                     (highlighted ? Tokens.Colors.accentWash : Tokens.Colors.cardFill)
                     if let ambient, !highlighted {
-                        Image(decorative: ambient.cgImage, scale: 1)
-                            .resizable().aspectRatio(contentMode: .fill)
-                            .blur(radius: 30, opaque: true).saturation(1.7)
+                        // Drawn as an overlay of a flexible clear view so the aspect-fill image never sizes the card.
+                        Color.clear
+                            .overlay {
+                                Image(decorative: ambient.cgImage, scale: 1)
+                                    .resizable().aspectRatio(contentMode: .fill)
+                                    .blur(radius: 30, opaque: true).saturation(1.7)
+                            }
+                            .clipped()
                             .opacity(Tokens.Colors.ambientOpacity)
                             .overlay(Tokens.Colors.ambientVeil)
                             .transition(.opacity)
