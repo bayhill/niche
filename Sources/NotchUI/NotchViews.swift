@@ -9,6 +9,8 @@ final class NotchViewModel {
     var state: NotchState = .closed
     var page: ModuleID?
     var dropTargeted = false
+    /// `HoverHint.isVisible` for the current state and settings.
+    var hintVisible = false
     var activity: LiveActivity?
     var hint: DropHint = .fallback
     var layout: NotchLayout
@@ -37,6 +39,9 @@ struct NotchRootView: View {
         ) {
             NotchContentView(model: model)
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Notcher")
+        .accessibilityHint(model.state == .expanded ? "" : HoverHint.text)
         .opacity(layout.surfaceOpacity)
         .offset(x: layout.centerOffset)
         .frame(width: layout.windowFrame.width, height: layout.windowFrame.height, alignment: .top)
@@ -124,10 +129,19 @@ private struct NotchContentView: View {
         let layout = model.layout
         let notch = layout.notchRect.size
         ZStack(alignment: .top) {
+            // Always mounted: its progress animates in the same transaction as the shape, so it grows, shrinks and
+            // reverses with the swell spring instead of being inserted or removed.
+            HoverHintView(progress: model.hintVisible ? 1 : 0)
+                .frame(width: notch.width + PanelLayout.hoverGrowth.width, height: PanelLayout.hoverGrowth.height)
+                .padding(.top, layout.bandHeight)
+                .allowsHitTesting(false)
             if model.state == .activity || model.state == .hover, let activity = model.activity {
-                WingsView(activity: activity, notchWidth: notch.width)
+                WingsView(activity: activity, notchWidth: notch.width, wingWidth: layout.wingWidth)
                     .frame(
-                        width: NotchGeometry.bodyWidth(model.state, notch: notch, hasActivity: true),
+                        width: NotchGeometry.bodyWidth(
+                            model.state, notch: notch, hasActivity: true, wingWidth: layout.wingWidth,
+                            hoverHint: layout.hoverHint
+                        ),
                         height: layout.bandHeight
                     )
                     .id(activity.id)
@@ -166,20 +180,81 @@ private struct NotchContentView: View {
 private struct WingsView: View {
     let activity: LiveActivity
     let notchWidth: CGFloat
+    let wingWidth: CGFloat
 
     var body: some View {
         HStack(spacing: 0) {
-            ActivityGlyphView(glyph: activity.leading)
-                .notchHero(activity.module)
-                .frame(width: PanelLayout.wingWidth)
-            Spacer(minLength: notchWidth)
-            Group {
-                if let trailing = activity.trailing { ActivityGlyphView(glyph: trailing) } else { Color.clear }
+            // Left wing, outer edge inward: glyph, then the text running toward the notch.
+            HStack(spacing: 0) {
+                ActivityGlyphView(glyph: activity.leading)
+                    .notchHero(activity.module)
+                    .frame(width: PanelLayout.wingWidth)
+                WingLine(text: activity.leadingText, color: Tokens.Colors.textPrimary, alignment: .leading)
+                    .padding(.trailing, WingText.innerInset)
             }
-            .frame(width: PanelLayout.wingWidth)
+            .frame(width: wingWidth, alignment: .leading)
+
+            Spacer(minLength: notchWidth)
+
+            // Right wing, notch outward: the text, then the glyph at the outer edge.
+            HStack(spacing: 0) {
+                WingLine(text: activity.trailingText, color: Tokens.Colors.textSecondary, alignment: .trailing)
+                    .padding(.leading, WingText.innerInset)
+                if let trailing = activity.trailing {
+                    ActivityGlyphView(glyph: trailing).frame(width: PanelLayout.wingWidth)
+                } else if !(activity.trailingText ?? "").isEmpty {
+                    Color.clear.frame(width: WingText.outerInset)
+                } else {
+                    Color.clear.frame(width: PanelLayout.wingWidth)
+                }
+            }
+            .frame(width: wingWidth, alignment: .trailing)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(activity.accessibilityLabel)
+    }
+}
+
+/// "Click to expand Notcher" below the notch, emerging from it as it swells.
+private struct HoverHintView: View, Animatable {
+    var progress: Double
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    nonisolated var animatableData: Double {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    var body: some View {
+        Text(HoverHint.text)
+            .font(NotchTextStyle.wing.font)
+            .foregroundStyle(Tokens.Colors.textSecondary)
+            .lineLimit(1)
+            .fixedSize()
+            .scaleEffect(HoverHint.scale(progress: progress, reduceMotion: reduceMotion), anchor: .top)
+            .opacity(progress)
+            .accessibilityHidden(true)
+    }
+}
+
+/// One line of wing text: never scaled, truncated with an ellipsis, cross-fading when it changes (next track).
+private struct WingLine: View {
+    let text: String?
+    let color: Color
+    let alignment: Alignment
+
+    var body: some View {
+        if let text, !text.isEmpty {
+            Text(text)
+                .font(NotchTextStyle.wing.font)
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .contentTransition(.opacity)
+                .frame(maxWidth: .infinity, alignment: alignment)
+        } else {
+            Spacer(minLength: 0)
+        }
     }
 }
 

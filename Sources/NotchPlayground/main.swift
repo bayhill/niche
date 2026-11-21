@@ -6,7 +6,7 @@ import SwiftUI
 
 // Runs the real NotchController with fake modules covering every placement and every live-activity glyph.
 //
-//   swift run NotchPlayground [DebugOptions flags] [--glyph symbol|progress|text|countdown|image|equalizer]
+//   swift run NotchPlayground [DebugOptions flags] [--glyph symbol|progress|text|countdown|image|equalizer|nowplaying|nowplaying-short]
 //                             [--no-activity] [--quit-after <seconds>] [--hover-opens]
 
 private struct PlaygroundOptions {
@@ -116,7 +116,7 @@ private func makeModules(_ options: PlaygroundOptions) -> [FakeModule] {
     case "progress": [(convert, .progress, .progress(0.62), .text("3/12"), "Converting 3 of 12")]
     case "text": [(convert, .progress, .text("3/12"), .progress(0.25), "Converting 3 of 12")]
     case "countdown": [(calendar, .passive, .countdown(to: soon), .symbol("calendar", tint: .accent), "Design review soon")]
-    case "image": [(nowPlaying, .ambient, .image(Samples.art), .equalizer(playing: true), "Weightless playing")]
+    case "image", "nowplaying", "nowplaying-short": [(nowPlaying, .ambient, .image(Samples.art), .equalizer(playing: true), "Weightless playing")]
     case "equalizer": [(nowPlaying, .ambient, .equalizer(playing: true), .image(Samples.art), "Weightless playing")]
     default: [
         (nowPlaying, .ambient, .image(Samples.art), .equalizer(playing: true), "Weightless playing"),
@@ -126,6 +126,17 @@ private func makeModules(_ options: PlaygroundOptions) -> [FakeModule] {
     if !options.noActivity {
         for (module, priority, leading, trailing, label) in base {
             module.liveActivity = Samples.activity(module.id, priority, leading, trailing, label)
+        }
+        // Wing text: `--glyph nowplaying` (a long title that truncates) or `--glyph nowplaying-short`.
+        let texts: (String, String)? = switch options.glyph {
+        case "nowplaying": ("Weightless (Ambient Transmission, Part 1) – Remastered 2024", "Marconi Union")
+        case "nowplaying-short": ("Weightless", "Marconi Union")
+        default: nil
+        }
+        if let texts, var activity = nowPlaying.liveActivity {
+            activity.leadingText = texts.0
+            activity.trailingText = texts.1
+            nowPlaying.liveActivity = activity
         }
     }
     return [nowPlaying, calendar, convert, claude, shelf, clipboard, hidden]

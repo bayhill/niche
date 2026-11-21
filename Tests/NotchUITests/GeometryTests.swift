@@ -118,7 +118,15 @@ struct GeometryTests {
             switch state {
             case .closed: #expect(l.hitRect == (f.claimsClosed ? f.notch : .null))
             case .activity: #expect(l.hitRect == f.notch)
-            case .hover, .drop, .expanded: #expect(l.hitRect == l.visibleRect)
+            case .hover:
+                // The swell around the notch, hint included; never the wings beside it.
+                let g = PanelLayout.hoverGrowth
+                #expect(l.hitRect == CGRect(
+                    x: f.notch.midX - (f.notch.width + g.width) / 2, y: f.notch.maxY - f.notch.height - g.height,
+                    width: f.notch.width + g.width, height: f.notch.height + g.height
+                ))
+                #expect(layout(f, .hover, activity: false).hitRect == layout(f, .hover, activity: false).visibleRect)
+            case .drop, .expanded: #expect(l.hitRect == l.visibleRect)
             }
             guard !l.hitRect.isNull else { continue }
             let r = l.hitRect
@@ -203,6 +211,126 @@ struct GeometryTests {
         }
         #expect(NotchGeometry.distance(from: CGPoint(x: 0, y: 0), to: CGRect(x: 3, y: 4, width: 1, height: 1)) == 5)
         #expect(NotchGeometry.distance(from: CGPoint(x: 3.5, y: 4.5), to: CGRect(x: 3, y: 4, width: 1, height: 1)) == 0)
+    }
+}
+
+@Suite("Wing text and hover hint")
+struct WingAndHoverTests {
+    let m = ScreenMetrics.mbp14MoreSpace
+    let notch = CGRect(x: 790, y: 1131, width: 220, height: 38)
+
+    @Test func noTextKeepsTheGlyphOnlyWing() {
+        #expect(WingText.width(leadingTextWidth: 0, trailingTextWidth: 0, hasTrailingGlyph: true) == PanelLayout.wingWidth)
+        let a = LiveActivity(id: "a", module: .nowPlaying, priority: .ambient, leading: .equalizer(playing: true),
+                             trailing: .text("3/12"), leadingText: "", trailingText: nil, accessibilityLabel: "x")
+        #expect(WingText.width(for: a) == PanelLayout.wingWidth)
+    }
+
+    @Test func shortTextWidensToFit() {
+        let measured = WingText.measure("Weightless")
+        #expect(measured > 30 && measured < 90)
+        let w = WingText.width(leadingTextWidth: measured, trailingTextWidth: 0, hasTrailingGlyph: true)
+        #expect(w == PanelLayout.wingWidth + measured + WingText.innerInset)
+        #expect(w < PanelLayout.wingMaxWidth)
+        // Measuring uses the wing style's size: wider text measures wider, empty measures nothing.
+        #expect(WingText.measure("Weightless and more") > measured)
+        #expect(WingText.measure("") == 0)
+    }
+
+    @Test func longTextIsCappedAtTheMaximum() {
+        let long = WingText.measure("Weightless (Ambient Transmission, Part 1) – Remastered 2024")
+        #expect(long > PanelLayout.wingMaxWidth)
+        #expect(WingText.width(leadingTextWidth: long, trailingTextWidth: 0, hasTrailingGlyph: true) == PanelLayout.wingMaxWidth)
+    }
+
+    @Test func bothWingsTakeTheWiderSide() {
+        let w = WingText.width(leadingTextWidth: 20, trailingTextWidth: 70, hasTrailingGlyph: true)
+        #expect(w == WingText.width(leadingTextWidth: 70, trailingTextWidth: 20, hasTrailingGlyph: true))
+        #expect(w == PanelLayout.wingWidth + 70 + WingText.innerInset)
+        // Trailing text without a trailing glyph only needs the outer inset.
+        #expect(WingText.width(leadingTextWidth: 0, trailingTextWidth: 70, hasTrailingGlyph: false)
+            == WingText.outerInset + 70 + WingText.innerInset)
+    }
+
+    @Test func widenedActivityShapeIsSymmetricAndOnlyTheNotchTakesClicks() {
+        let wide = NotchGeometry.layout(metrics: m, state: .activity, hasActivity: true, wingWidth: 120)
+        let plain = NotchGeometry.layout(metrics: m, state: .activity, hasActivity: true)
+        #expect(wide.wingWidth == 120)
+        #expect(wide.shapeRect.size == CGSize(width: 220 + 240 + 2 * Tokens.Radius.notchClosedTop, height: 38))
+        #expect(wide.visibleRect.midX == notch.midX)
+        #expect(wide.windowFrame == plain.windowFrame)
+        #expect(wide.shapeRect.minX + wide.windowFrame.minX == wide.visibleRect.minX)
+        #expect(wide.hitRect == notch)
+        #expect(!wide.hits(CGPoint(x: notch.minX - 100, y: notch.midY)))
+        #expect(!wide.hits(CGPoint(x: notch.maxX + 100, y: notch.midY)))
+    }
+
+    @Test func theWindowHoldsTheWidestWingsWithOvershootOnEveryFixture() {
+        for metrics in [ScreenMetrics.mbp14MoreSpace, .mbp14Default, .external1080p, .externalHiddenMenuBar] {
+            let l = NotchGeometry.layout(metrics: metrics, state: .hover, hasActivity: true, wingWidth: PanelLayout.wingMaxWidth)
+            #expect(l.wingWidth == PanelLayout.wingMaxWidth)
+            let slack = l.windowFrame.insetBy(dx: NotchGeometry.windowMargin / 2, dy: 0)
+            #expect(slack.minX <= l.visibleRect.minX && slack.maxX >= l.visibleRect.maxX)
+            #expect(metrics.frame.contains(l.visibleRect))
+        }
+    }
+
+    @Test func aNarrowScreenClampsTheWings() {
+        let narrow = ScreenMetrics(
+            frame: CGRect(x: 0, y: 0, width: 420, height: 300), visibleFrame: CGRect(x: 0, y: 0, width: 420, height: 275),
+            safeTop: 0, auxLeft: nil, auxRight: nil
+        )
+        for state in [NotchState.activity, .hover] {
+            let l = NotchGeometry.layout(metrics: narrow, state: state, hasActivity: true, wingWidth: PanelLayout.wingMaxWidth)
+            #expect(l.wingWidth < PanelLayout.wingMaxWidth)
+            #expect(narrow.frame.contains(l.visibleRect))
+            #expect(l.windowFrame.insetBy(dx: NotchGeometry.windowMargin / 2 - 0.5, dy: 0).contains(
+                CGRect(x: l.visibleRect.minX, y: l.windowFrame.minY + 1, width: l.visibleRect.width, height: 1)))
+        }
+        #expect(NotchGeometry.layout(metrics: narrow, state: .activity, hasActivity: true, wingWidth: 50).wingWidth == 50)
+    }
+
+    @Test func hoverMakesRoomForTheHintUnlessHoverOpens() {
+        let hint = NotchGeometry.layout(metrics: m, state: .hover, hoverHint: true)
+        let compact = NotchGeometry.layout(metrics: m, state: .hover, hoverHint: false)
+        #expect(hint.shapeRect.size == CGSize(width: 220 + PanelLayout.hoverGrowth.width, height: 38 + PanelLayout.hoverGrowth.height))
+        #expect(compact.shapeRect.size
+            == CGSize(width: 220 + PanelLayout.hoverGrowthCompact.width, height: 38 + PanelLayout.hoverGrowthCompact.height))
+        #expect(hint.hitRect == hint.visibleRect)
+        #expect(compact.hitRect == compact.visibleRect)
+        // The hint line below the notch is clickable.
+        #expect(hint.hits(CGPoint(x: notch.midX, y: notch.minY - 12)))
+        #expect(!compact.hits(CGPoint(x: notch.midX, y: notch.minY - 12)))
+    }
+
+    @Test func hoverComposesWithWidenedWings() {
+        let wing: CGFloat = 120
+        let activity = NotchGeometry.layout(metrics: m, state: .activity, hasActivity: true, wingWidth: wing)
+        let hover = NotchGeometry.layout(metrics: m, state: .hover, hasActivity: true, wingWidth: wing)
+        // Same wings, swollen by exactly the hover growth: the spring only grows the shape.
+        #expect(hover.wingWidth == activity.wingWidth)
+        #expect(hover.shapeRect.width == activity.shapeRect.width + PanelLayout.hoverGrowth.width)
+        #expect(hover.shapeRect.height == activity.shapeRect.height + PanelLayout.hoverGrowth.height)
+        #expect(hover.visibleRect.midX == activity.visibleRect.midX)
+        // Clickable: the swell around the notch. Not: the wings, nor the area below them, nor the menu bar beyond.
+        #expect(hover.hits(CGPoint(x: notch.midX, y: notch.minY - 12)))
+        #expect(hover.hits(CGPoint(x: notch.minX - PanelLayout.hoverGrowth.width / 2, y: notch.midY)))
+        #expect(!hover.hits(CGPoint(x: notch.minX - 20, y: notch.midY)))
+        #expect(!hover.hits(CGPoint(x: notch.minX - 60, y: notch.minY - 12)))
+        #expect(!hover.hits(CGPoint(x: hover.visibleRect.maxX + 5, y: notch.midY)))
+    }
+
+    @Test func hintVisibilityRule() {
+        for state in NotchState.allCases {
+            #expect(HoverHint.isVisible(state: state, openOnHover: false) == (state == .hover))
+            #expect(!HoverHint.isVisible(state: state, openOnHover: true))
+        }
+        #expect(HoverHint.text == "Click to expand Notcher")
+        #expect(HoverHint.scale(progress: 0, reduceMotion: false) == HoverHint.startScale)
+        #expect(HoverHint.scale(progress: 1, reduceMotion: false) == 1)
+        #expect(abs(HoverHint.scale(progress: 0.5, reduceMotion: false) - 0.91) < 0.0001)
+        #expect(HoverHint.scale(progress: 0, reduceMotion: true) == 1)
+        #expect(HoverHint.scale(progress: 2, reduceMotion: false) == 1)
     }
 }
 

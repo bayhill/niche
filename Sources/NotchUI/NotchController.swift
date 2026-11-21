@@ -44,6 +44,8 @@ public final class NotchController: NotchControlling {
     private var toggleKey: HotKey?
     private var frameMonitor: FrameRateMonitor?
     private var fullscreen = false
+    /// Wing width for the current activity's text (`WingText`), before clamping to the screen.
+    private var wingWidth = PanelLayout.wingWidth
     private var moduleSignature: [ModuleSignature] = []
     private var drag = DragTracking()
 
@@ -191,6 +193,7 @@ public final class NotchController: NotchControlling {
             model.state = machine.state
             model.page = machine.page
             model.dropTargeted = machine.dropTargeted
+            model.hintVisible = HoverHint.isVisible(state: machine.state, openOnHover: machine.openOnHover)
             model.layout = layout
         }
         if before.state == .expanded, machine.state != .expanded { relinquishKeyFocus() }
@@ -198,7 +201,10 @@ public final class NotchController: NotchControlling {
     }
 
     private func currentLayout() -> NotchLayout {
-        NotchGeometry.layout(metrics: metrics, state: machine.state, hasActivity: machine.hasActivity, simulatedNotch: debug.simulateNotch)
+        NotchGeometry.layout(
+            metrics: metrics, state: machine.state, hasActivity: machine.hasActivity, wingWidth: wingWidth,
+            hoverHint: !machine.openOnHover, simulatedNotch: debug.simulateNotch
+        )
     }
 
     static func animation(from: NotchState, to: NotchState) -> Animation {
@@ -421,7 +427,16 @@ public final class NotchController: NotchControlling {
         let now = Date()
         let candidates = enabledModules.compactMap(\.liveActivity)
         let chosen = ActivityArbiter.select(candidates, now: now, fullscreen: fullscreen)
-        if chosen != model.activity { Motion.animate(Motion.morph) { model.activity = chosen } }
+        let wing = chosen.map(WingText.width(for:)) ?? PanelLayout.wingWidth
+        if chosen != model.activity || wing != wingWidth {
+            wingWidth = wing
+            let layout = currentLayout()
+            // Next track: the wings resize and the text cross-fades in one morph; glyphs ride the wing edges.
+            Motion.animate(Motion.morph) {
+                model.activity = chosen
+                model.layout = layout
+            }
+        }
         if !pinned { send(.activityChanged(chosen != nil)) }
 
         expiryTask?.cancel()
