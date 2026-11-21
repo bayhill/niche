@@ -60,6 +60,7 @@ public final class AdapterProvider: NowPlayingProvider {
     private var task: Task<Void, Never>?
     private var terminationObserver: (any NSObjectProtocol)?
     private var last: NowPlayingState?
+    private var generation = 0
     /// Number of times the stream process has been launched. For tests and diagnostics.
     public private(set) var launches = 0
 
@@ -76,12 +77,18 @@ public final class AdapterProvider: NowPlayingProvider {
     /// media is active it briefly publishes a silent fake entry from the test client.
     public nonisolated static func selfTest(
         _ locations: AdapterLocations, launcher: any ProcessLaunching = FoundationProcessLauncher(), timeout: Duration = .seconds(10)
-    ) async -> Bool {
+    ) async -> AdapterTestOutcome {
         let result = await launcher.run(
             locations.perl, arguments: [locations.script.path, locations.framework.path, locations.testClient.path, "test"],
             timeout: timeout
         )
-        return result.status == 0 && !result.timedOut
+        return outcome(of: result)
+    }
+
+    /// Exit 0 passes; a timeout or a launch failure (status -1) is unknown; any other exit fails.
+    public nonisolated static func outcome(of result: ProcessResult) -> AdapterTestOutcome {
+        if result.timedOut || result.status < 0 { return .unknown }
+        return result.status == 0 ? .passed : .failed
     }
 
     public func start() {
@@ -90,13 +97,17 @@ public final class AdapterProvider: NowPlayingProvider {
         let executable = locations.perl
         let arguments = locations.arguments(["stream", "--micros", "--debounce=60"])
         // Detached so JSON and artwork decoding stay off the main actor; events hop back in order.
-        let emit: @Sendable (StreamEvent) async -> Void = { [weak self] event in await self?.handle(event) }
+        generation &+= 1
+        let generation = generation
+        // Events carry their run's generation so a stopped run can never leak a late state into the next one.
+        let emit: @Sendable (StreamEvent) async -> Void = { [weak self] event in await self?.handle(event, generation: generation) }
         task = Task.detached {
             await Self.supervise(
                 launcher: launcher, executable: executable, arguments: arguments, backoff: backoff, sleep: sleep, log: log,
                 emit: emit
             )
         }
+        removeTerminationObserver()
         terminationObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification, object: nil, queue: .main
         ) { [weak self] _ in
@@ -145,13 +156,14 @@ public final class AdapterProvider: NowPlayingProvider {
         }
     }
 
-    private func handle(_ event: StreamEvent) {
-        guard task != nil else { return }
+    private func handle(_ event: StreamEvent, generation: Int) {
+        guard task != nil, generation == self.generation else { return }
         switch event {
         case .launched: launches += 1
         case .state(let state): deliver(state)
         case .gaveUp:
             task = nil
+            removeTerminationObserver()
             onFailure?(.gaveUp)
         }
     }
@@ -159,6 +171,12 @@ public final class AdapterProvider: NowPlayingProvider {
     public func stop() {
         task?.cancel()
         task = nil
+        generation &+= 1
+        last = nil
+        removeTerminationObserver()
+    }
+
+    private func removeTerminationObserver() {
         if let terminationObserver { NotificationCenter.default.removeObserver(terminationObserver) }
         terminationObserver = nil
     }

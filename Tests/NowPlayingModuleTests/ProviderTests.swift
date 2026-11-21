@@ -89,11 +89,13 @@ private let locations = AdapterLocations(
 
     @Test func selfTestPassesOnlyOnCleanExit() async {
         let ok = FakeLauncher(runResult: ProcessResult(status: 0))
-        #expect(await AdapterProvider.selfTest(locations, launcher: ok))
+        #expect(await AdapterProvider.selfTest(locations, launcher: ok) == .passed)
         #expect(ok.ran.first == ["/usr/bin/perl", locations.script.path, locations.framework.path, locations.testClient.path, "test"])
         #expect(locations.testClient.lastPathComponent == "MediaRemoteAdapterTestClient")
-        #expect(!(await AdapterProvider.selfTest(locations, launcher: FakeLauncher(runResult: ProcessResult(status: 4)))))
-        #expect(!(await AdapterProvider.selfTest(locations, launcher: FakeLauncher(runResult: ProcessResult(status: 0, timedOut: true)))))
+        #expect(await AdapterProvider.selfTest(locations, launcher: FakeLauncher(runResult: ProcessResult(status: 4))) == .failed)
+        // A timeout (e.g. a loaded login) or a launch failure says nothing about MediaRemote.
+        #expect(await AdapterProvider.selfTest(locations, launcher: FakeLauncher(runResult: ProcessResult(status: 15, timedOut: true))) == .unknown)
+        #expect(await AdapterProvider.selfTest(locations, launcher: FakeLauncher(runResult: ProcessResult(status: -1))) == .unknown)
     }
 
     @Test func bundleLookupNeedsBothFiles() throws {
@@ -179,7 +181,8 @@ private let locations = AdapterLocations(
     @Test func scriptsTargetTheRightApp() {
         #expect(ScriptablePlayer.spotify.statusScript.contains("tell application id \"com.spotify.client\""))
         #expect(ScriptablePlayer.spotify.statusScript.contains("/ 1000"))
-        #expect(ScriptablePlayer.music.commandScript(.next) == "tell application id \"com.apple.Music\" to next track")
+        #expect(ScriptablePlayer.music.commandScript(.next)
+            == "if application id \"com.apple.Music\" is running then tell application id \"com.apple.Music\" to next track")
         #expect(ScriptablePlayer.spotify.commandScript(.togglePlayPause).hasSuffix("playpause"))
     }
 }
@@ -220,7 +223,7 @@ struct RealAdapterTests {
     @Test func selfTestAndStream() async throws {
         let dir = URL(filePath: try #require(ProcessInfo.processInfo.environment["NOTCHER_ADAPTER_DIR"]))
         let loc = AdapterLocations(script: dir.appending(path: "mediaremote-adapter.pl"), framework: dir.appending(path: "MediaRemoteAdapter.framework"))
-        #expect(await AdapterProvider.selfTest(loc))
+        #expect(await AdapterProvider.selfTest(loc) == .passed)
         let provider = AdapterProvider(locations: loc)
         var updates = 0
         provider.onUpdate = { _ in updates += 1 }
@@ -230,5 +233,128 @@ struct RealAdapterTests {
         provider.stop()
         print("real adapter: launches \(provider.launches), updates \(updates)")
         #expect(provider.launches == 1)
+    }
+}
+
+@MainActor
+@Suite struct FallbackPollingTests {
+    @Test func scriptsGuardAgainstRelaunchingAPlayerThatQuit() {
+        for player in ScriptablePlayer.allCases {
+            let script = player.statusScript
+            let guardLine = script.range(of: "if application id \"\(player.bundleID)\" is running then")
+            let tell = script.range(of: "tell application id \"\(player.bundleID)\"")
+            #expect(guardLine != nil && tell != nil && guardLine!.lowerBound < tell!.lowerBound)
+            for command in MediaCommand.allCases {
+                #expect(player.commandScript(command).hasPrefix("if application id \"\(player.bundleID)\" is running then"))
+            }
+        }
+        #expect(PlayerScriptOutput.parse("notrunning\n", player: .spotify, now: .now) == nil)
+    }
+
+    @Test func schedule() {
+        let s = PollSchedule()
+        #expect(s.interval(playing: true, idleFor: 10_000) == .milliseconds(1500))
+        #expect(s.interval(playing: false, idleFor: 0) == .seconds(5))
+        #expect(s.interval(playing: false, idleFor: 299) == .seconds(5))
+        #expect(s.interval(playing: false, idleFor: 300) == .seconds(20))
+        #expect(s.noPlayer == .seconds(30))
+    }
+
+    @Test func pollReturnsTheScheduledInterval() async {
+        let output = OutputBox(output: "playing\nSong\nArtist\nAlbum\n200\n10\n")
+        let runner = FakeScriptRunner { _ in .success(output.get()) }
+        let clock = Box(Date(timeIntervalSince1970: 1000))
+        let running = Box<[ScriptablePlayer]>([.music])
+        let provider = AppleScriptProvider(
+            runner: runner, runningPlayers: { running.value }, loadArtwork: { _ in nil }, observeApps: false, now: { clock.value }
+        )
+        #expect(await provider.poll() == .milliseconds(1500))
+        output.set("paused\nSong\nArtist\nAlbum\n200\n12\n")
+        #expect(await provider.poll() == .seconds(5))
+        clock.value = clock.value.addingTimeInterval(400) // nothing changed for a while
+        #expect(await provider.poll() == .seconds(20))
+        running.value = []
+        let calls = runner.calls.withLock { $0 }
+        #expect(await provider.poll() == .seconds(30))
+        #expect(runner.calls.withLock { $0 } == calls) // no osascript without a running player
+    }
+
+    @Test func stopClearsStateSoARestartRepublishes() async {
+        let runner = FakeScriptRunner { _ in .success("playing\nSong\nArtist\nAlbum\n200\n10\n") }
+        let sleeper = RecordingSleeper()
+        let provider = AppleScriptProvider(
+            runner: runner, runningPlayers: { [.music] }, loadArtwork: { _ in nil }, observeApps: false, sleep: sleeper.sleep
+        )
+        var updates = 0
+        provider.onUpdate = { _ in updates += 1 }
+        provider.start()
+        #expect(await eventually { updates == 1 })
+        provider.stop()
+        provider.kick() // ignored while stopped
+        let callsAfterStop = runner.calls.withLock { $0 }
+        try? await Task.sleep(for: .milliseconds(30))
+        #expect(runner.calls.withLock { $0 } <= callsAfterStop + 1)
+        provider.start()
+        #expect(await eventually { updates == 2 })
+        provider.stop()
+    }
+}
+
+@MainActor
+@Suite struct RestartTests {
+    @Test func startStopStartWithFakeChildren() async {
+        let first = FakeChild(chunks: [StreamFixture.full(StreamFixture.track)], stayOpen: true)
+        let second = FakeChild(chunks: [StreamFixture.full(StreamFixture.track)], stayOpen: true)
+        let launcher = FakeLauncher(children: [first, second])
+        let provider = AdapterProvider(locations: locations, launcher: launcher, sleep: RecordingSleeper().sleep)
+        var updates: [NowPlayingState?] = []
+        provider.onUpdate = { updates.append($0) }
+        provider.start()
+        #expect(await eventually { updates.count == 1 })
+        provider.stop()
+        #expect(first.terminated)
+        provider.start()
+        // Same track again after a restart: republished, because stop forgot the last state.
+        #expect(await eventually { updates.count == 2 })
+        #expect(launcher.launched.count == 2)
+        provider.stop()
+        #expect(second.terminated)
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(launcher.launched.count == 2)
+    }
+
+    /// Real processes: a stand-in "adapter" that records its pid, so the test can check nothing survives a stop.
+    @Test func startStopStartLeavesNoRunningChild() async throws {
+        let dir = FileManager.default.temporaryDirectory.appending(path: "np-restart-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let pids = dir.appending(path: "pids")
+        let script = dir.appending(path: "fake-adapter.sh")
+        try Data("""
+        echo $$ >> "\(pids.path)"
+        printf '{"type":"data","diff":false,"payload":{}}\\n'
+        exec sleep 60
+        """.utf8).write(to: script)
+        let loc = AdapterLocations(perl: URL(filePath: "/bin/sh"), script: script, framework: dir.appending(path: "X.framework"))
+        let provider = AdapterProvider(locations: loc)
+
+        func recorded() -> [Int32] {
+            ((try? String(contentsOf: pids, encoding: .utf8)) ?? "").split(separator: "\n").compactMap { Int32($0) }
+        }
+        func alive(_ pid: Int32) -> Bool { kill(pid, 0) == 0 }
+
+        provider.start()
+        #expect(await eventually { recorded().count == 1 })
+        provider.stop()
+        let firstPID = try #require(recorded().first)
+        #expect(await eventually { !alive(firstPID) })
+        provider.start()
+        #expect(await eventually { recorded().count == 2 })
+        let secondPID = recorded()[1]
+        #expect(alive(secondPID))
+        #expect(!alive(firstPID))
+        provider.stop()
+        #expect(await eventually { !alive(secondPID) })
+        #expect(provider.launches == 2)
     }
 }

@@ -44,28 +44,66 @@ public enum MeetingLinkExtractor {
         return nil
     }
 
-    /// The meeting link a single URL stands for, if any.
+    /// The meeting link a single URL stands for, if any. Only https links on known meeting hosts are accepted
+    /// (http is upgraded); custom schemes such as `zoommtg:` or `msteams:` from invite text are never opened, since
+    /// anyone can send an invite. URLs with user info or a non-default port are rejected. The returned URL is rebuilt
+    /// from the validated parts.
     public static func classify(_ url: URL) -> MeetingLink? {
         let url = unwrap(url)
-        let scheme = url.scheme?.lowercased() ?? ""
-        if scheme == "zoommtg" || scheme == "zoomus" { return MeetingLink(provider: .zoom, url: url) }
-        guard scheme == "https" || scheme == "http", let host = url.host()?.lowercased() else { return nil }
-        let path = url.path(percentEncoded: true).lowercased()
+        guard
+            let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+            let scheme = components.scheme?.lowercased(), scheme == "https" || scheme == "http",
+            components.user == nil, components.password == nil,
+            components.port == nil || components.port == 443,
+            let rawHost = components.percentEncodedHost, !rawHost.isEmpty,
+            rawHost.unicodeScalars.allSatisfy({ $0.isASCII && (CharacterSet.alphanumerics.contains($0) || $0 == "." || $0 == "-") })
+        else { return nil }
+        let host = rawHost.lowercased()
+        let path = components.percentEncodedPath
+        let segments = path.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
 
         func isHost(_ domain: String) -> Bool { host == domain || host.hasSuffix("." + domain) }
+        func rebuilt(query: [URLQueryItem]? = components.queryItems, keepQuery: Bool = true) -> URL? {
+            var out = URLComponents()
+            out.scheme = "https"
+            out.host = host
+            out.percentEncodedPath = path
+            if keepQuery { out.percentEncodedQuery = components.percentEncodedQuery } else { out.queryItems = query }
+            return out.url
+        }
+        func link(_ provider: MeetingProvider, _ url: URL?) -> MeetingLink? { url.map { MeetingLink(provider: provider, url: $0) } }
 
         if host == "teams.microsoft.com" || host == "teams.cloud.microsoft" {
-            if path.hasPrefix("/l/meetup-join") || path.hasPrefix("/meet/") { return MeetingLink(provider: .teams, url: url) }
+            let lower = path.lowercased()
+            if lower.hasPrefix("/l/meetup-join/") || lower.hasPrefix("/meet/") { return link(.teams, rebuilt()) }
         }
-        if host == "teams.live.com", path.hasPrefix("/meet") { return MeetingLink(provider: .teams, url: url) }
-        if host == "meet.google.com", path.count > 1, !path.hasPrefix("/_") { return MeetingLink(provider: .meet, url: url) }
+        if host == "teams.live.com", path.lowercased().hasPrefix("/meet/") { return link(.teams, rebuilt()) }
+        if host == "meet.google.com", segments.count == 1, isMeetCode(segments[0]) {
+            return link(.meet, rebuilt(query: nil, keepQuery: false))
+        }
         if isHost("zoom.us") || isHost("zoomgov.com") {
-            if ["/j/", "/my/", "/w/", "/wc/join/"].contains(where: path.hasPrefix) { return MeetingLink(provider: .zoom, url: url) }
+            // /j/<id>, /w/<id> (webinar), /wc/join/<id>; the id must be numeric. Only the passcode query survives.
+            let id: String? = switch segments.map({ $0.lowercased() }) {
+            case let s where s.count == 2 && (s[0] == "j" || s[0] == "w"): segments[1]
+            case let s where s.count == 3 && s[0] == "wc" && s[1] == "join": segments[2]
+            default: nil
+            }
+            guard let id, (9...12).contains(id.count), id.allSatisfy(\.isASCII), id.allSatisfy(\.isNumber) else { return nil }
+            let pwd = components.queryItems?.first(where: { $0.name == "pwd" }).flatMap { item in
+                item.value.flatMap { v in v.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "." || $0 == "-" || $0 == "_") } ? item : nil }
+            }
+            return link(.zoom, rebuilt(query: pwd.map { [$0] }, keepQuery: false))
         }
-        if isHost("webex.com"), !["www.webex.com", "help.webex.com", "webex.com"].contains(host), path.count > 1 {
-            return MeetingLink(provider: .webex, url: url)
+        if isHost("webex.com"), !["www.webex.com", "help.webex.com", "webex.com"].contains(host), !segments.isEmpty {
+            return link(.webex, rebuilt())
         }
         return nil
+    }
+
+    /// Google Meet codes look like `abc-defg-hij`.
+    private static func isMeetCode(_ s: String) -> Bool {
+        let parts = s.split(separator: "-", omittingEmptySubsequences: false)
+        return parts.map(\.count) == [3, 4, 3] && parts.allSatisfy { $0.allSatisfy { $0.isASCII && $0.isLetter && $0.isLowercase } }
     }
 
     /// Removes Microsoft Safe Links wrappers (`*.safelinks.protection.outlook.com/?url=...` and the Teams

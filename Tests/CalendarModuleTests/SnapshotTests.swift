@@ -18,7 +18,7 @@ import Testing
         }
         let inProgress = SampleEventSource(events: [
             CalendarEvent(id: "now", title: "Quarterly planning with the whole product group", start: now.addingTimeInterval(-60),
-                          end: now.addingTimeInterval(3600), url: URL(string: "https://acme.zoom.us/j/123")),
+                          end: now.addingTimeInterval(3600), url: URL(string: "https://acme.zoom.us/j/812345678")),
         ])
         let plain = SampleEventSource(events: [
             CalendarEvent(id: "lunch", title: "Lunch with Sam", start: now.addingTimeInterval(3 * 3600), end: now.addingTimeInterval(4 * 3600)),

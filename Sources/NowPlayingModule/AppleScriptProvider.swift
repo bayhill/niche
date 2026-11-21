@@ -15,12 +15,17 @@ public enum ScriptablePlayer: String, Sendable, CaseIterable {
     var statusScript: String {
         let duration = self == .spotify ? "((duration of t) / 1000)" : "(duration of t)"
         let artwork = self == .spotify ? "(artwork url of t)" : "\"\""
+        // The `is running` guard lives in the script so a player that quit after the process-list check is never
+        // relaunched by `tell`.
         return """
-        tell application id "\(bundleID)"
-            if player state is stopped then return "stopped"
-            set t to current track
-            return (player state as text) & linefeed & (name of t) & linefeed & (artist of t) & linefeed & (album of t) & linefeed & (\(duration) as text) & linefeed & (player position as text) & linefeed & \(artwork)
-        end tell
+        if application id "\(bundleID)" is running then
+            tell application id "\(bundleID)"
+                if player state is stopped then return "stopped"
+                set t to current track
+                return (player state as text) & linefeed & (name of t) & linefeed & (artist of t) & linefeed & (album of t) & linefeed & (\(duration) as text) & linefeed & (player position as text) & linefeed & \(artwork)
+            end tell
+        end if
+        return "notrunning"
         """
     }
 
@@ -30,7 +35,7 @@ public enum ScriptablePlayer: String, Sendable, CaseIterable {
         case .next: "next track"
         case .previous: "previous track"
         }
-        return "tell application id \"\(bundleID)\" to \(verb)"
+        return "if application id \"\(bundleID)\" is running then tell application id \"\(bundleID)\" to \(verb)"
     }
 }
 
@@ -39,7 +44,7 @@ public enum PlayerScriptOutput {
     /// Artwork URL is returned separately; the caller loads it.
     public static func parse(_ output: String, player: ScriptablePlayer, now: Date) -> (state: NowPlayingState, artworkURL: URL?)? {
         let lines = output.trimmingCharacters(in: .newlines).components(separatedBy: "\n")
-        guard lines.count >= 2, lines[0] != "stopped" else { return nil }
+        guard lines.count >= 2, lines[0] != "stopped", lines[0] != "notrunning" else { return nil }
         let title = lines[1].trimmingCharacters(in: .whitespaces)
         guard !title.isEmpty else { return nil }
         func field(_ i: Int) -> String? {
@@ -96,7 +101,8 @@ public final class AppleScriptProvider: NowPlayingProvider {
     private let runner: any ScriptRunning
     private let runningPlayers: @MainActor () -> [ScriptablePlayer]
     private let loadArtwork: @Sendable (URL) async -> SendableImage?
-    private let interval: Duration
+    private let schedule: PollSchedule
+    private let observeApps: Bool
     private let sleep: @Sendable (Duration) async throws -> Void
     private let now: @MainActor () -> Date
     private var task: Task<Void, Never>?
@@ -104,17 +110,21 @@ public final class AppleScriptProvider: NowPlayingProvider {
     private var lastPlayer: ScriptablePlayer?
     private var artworkCache: (url: URL, image: SendableImage?)?
     private var denied: Set<ScriptablePlayer> = []
+    /// When the published state last changed, for slowing down while nothing happens.
+    private var lastChange: Date?
+    private var appObservers: [any NSObjectProtocol] = []
 
     public init(
         runner: any ScriptRunning = OsascriptRunner(),
         runningPlayers: @escaping @MainActor () -> [ScriptablePlayer] = AppleScriptProvider.runningPlayers,
         loadArtwork: @escaping @Sendable (URL) async -> SendableImage? = AppleScriptProvider.downloadArtwork,
-        interval: Duration = .milliseconds(1500),
+        schedule: PollSchedule = PollSchedule(),
+        observeApps: Bool = true,
         sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
         now: @escaping @MainActor () -> Date = { .now }
     ) {
         self.runner = runner; self.runningPlayers = runningPlayers; self.loadArtwork = loadArtwork
-        self.interval = interval; self.sleep = sleep; self.now = now
+        self.schedule = schedule; self.observeApps = observeApps; self.sleep = sleep; self.now = now
     }
 
     public static func runningPlayers() -> [ScriptablePlayer] {
@@ -129,17 +139,43 @@ public final class AppleScriptProvider: NowPlayingProvider {
 
     public func start() {
         guard task == nil else { return }
-        task = Task { [weak self] in
-            while !Task.isCancelled, let self {
-                let wait = await self.poll()
-                do { try await self.sleep(wait) } catch { return }
+        if observeApps, appObservers.isEmpty {
+            let center = NSWorkspace.shared.notificationCenter
+            for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification] {
+                appObservers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
+                    let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+                    let isPlayer = app?.bundleIdentifier.flatMap(ScriptablePlayer.init(rawValue:)) != nil
+                    MainActor.assumeIsolated { if isPlayer { self?.kick() } }
+                })
             }
         }
+        loop()
     }
 
     public func stop() {
         task?.cancel()
         task = nil
+        for observer in appObservers { NSWorkspace.shared.notificationCenter.removeObserver(observer) }
+        appObservers = []
+        last = nil
+        lastChange = nil
+    }
+
+    /// Poll now and restart the schedule (a player launched or quit, or a command was sent).
+    func kick() {
+        guard task != nil else { return }
+        loop()
+    }
+
+    private func loop() {
+        task?.cancel()
+        task = Task { [weak self] in
+            while !Task.isCancelled, let self {
+                let wait = await self.poll()
+                guard !Task.isCancelled else { return }
+                do { try await self.sleep(wait) } catch { return }
+            }
+        }
     }
 
     public func send(_ command: MediaCommand) {
@@ -151,7 +187,7 @@ public final class AppleScriptProvider: NowPlayingProvider {
         let runner = runner, script = player.commandScript(command)
         Task { [weak self] in
             _ = await runner.run(script)
-            _ = await self?.poll()
+            self?.kick()
         }
     }
 
@@ -160,8 +196,8 @@ public final class AppleScriptProvider: NowPlayingProvider {
         let players = runningPlayers().filter { !denied.contains($0) }
         guard !players.isEmpty else {
             deliver(nil)
-            // Checking the process list is cheap and sends no Apple Events.
-            return interval * 2
+            // No Apple Events; launches arrive as notifications, this is only a safety net.
+            return schedule.noPlayer
         }
         var found: [(ScriptablePlayer, NowPlayingState, URL?)] = []
         for player in players {
@@ -179,14 +215,16 @@ public final class AppleScriptProvider: NowPlayingProvider {
         }
         guard let pick = found.first(where: { $0.1.isPlaying }) ?? found.first(where: { $0.0 == lastPlayer }) ?? found.first else {
             deliver(nil)
-            return interval
+            return schedule.interval(playing: false, idleFor: idleTime)
         }
         lastPlayer = pick.0
         var state = pick.1
         state.artwork = await artwork(for: pick.2)
         deliver(state)
-        return interval
+        return schedule.interval(playing: state.isPlaying, idleFor: idleTime)
     }
+
+    private var idleTime: TimeInterval { lastChange.map { now().timeIntervalSince($0) } ?? 0 }
 
     private func artwork(for url: URL?) async -> SendableImage? {
         guard let url else { return nil }
@@ -207,6 +245,25 @@ public final class AppleScriptProvider: NowPlayingProvider {
         }
         guard state != last else { return }
         last = state
+        lastChange = now()
         onUpdate?(state)
+    }
+}
+
+/// How often the Apple Events fallback polls. Pure.
+public struct PollSchedule: Sendable, Equatable {
+    public var playing: Duration = .milliseconds(1500)
+    public var paused: Duration = .seconds(5)
+    /// After `idleAfter` without any change while not playing.
+    public var idle: Duration = .seconds(20)
+    public var idleAfter: TimeInterval = 300
+    /// Neither player running: only the process list is checked; launches also arrive as notifications.
+    public var noPlayer: Duration = .seconds(30)
+
+    public init() {}
+
+    public func interval(playing isPlaying: Bool, idleFor: TimeInterval) -> Duration {
+        if isPlaying { return playing }
+        return idleFor >= idleAfter ? idle : paused
     }
 }

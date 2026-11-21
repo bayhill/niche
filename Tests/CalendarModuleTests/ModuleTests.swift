@@ -123,11 +123,11 @@ final class Clock {
     @Test func joinOpensTheLink() async throws {
         let env = try TestEnvironment(); defer { env.cleanUp() }
         let opened = Box()
-        let source = SampleEventSource(events: [event("z", start: 5, notes: "https://acme.zoom.us/j/42")])
+        let source = SampleEventSource(events: [event("z", start: 5, notes: "https://acme.zoom.us/j/842000000")])
         let module = make(source, clock: Clock(t0), opened: opened)
         await module.start(env.context(for: .calendar))
         module.join()
-        #expect(opened.urls == [URL(string: "https://acme.zoom.us/j/42")!])
+        #expect(opened.urls == [URL(string: "https://acme.zoom.us/j/842000000")!])
         module.stop()
     }
 

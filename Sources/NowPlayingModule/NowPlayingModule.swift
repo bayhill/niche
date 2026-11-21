@@ -85,35 +85,43 @@ public final class NowPlayingModule: NotchModule {
     public private(set) var isChecking = false
 
     @ObservationIgnored private let adapter: (any NowPlayingProvider)?
-    @ObservationIgnored private let adapterSelfTest: @Sendable () async -> Bool
+    @ObservationIgnored private let adapterSelfTest: @Sendable () async -> AdapterTestOutcome
     @ObservationIgnored private let selfTestKey: String?
+    @ObservationIgnored private let verifyAfter: Duration
+    @ObservationIgnored private let sleep: @Sendable (Duration) async throws -> Void
     @ObservationIgnored private var retriedAfterGiveUp = false
+    /// The stream started without a cached pass; it is confirmed by a real track or, failing that, by the self-test.
+    @ObservationIgnored private var verifying = false
     @ObservationIgnored private let fallback: (any NowPlayingProvider)?
     @ObservationIgnored private let now: @MainActor () -> Date
     @ObservationIgnored private var active: (any NowPlayingProvider)?
     @ObservationIgnored private var settings: SettingsStore?
-    @ObservationIgnored private var mayPrompt = false
     @ObservationIgnored private var running = false
     @ObservationIgnored private var selection: Task<Void, Never>?
     @ObservationIgnored private var log = Log.logger(for: .nowPlaying)
 
     /// - Parameters:
-    ///   - adapter: the preferred provider (MediaRemote adapter), used when `adapterSelfTest` passes.
-    ///   - fallback: used otherwise, but only once the user opted in (it may prompt for Automation).
-    ///   - selfTestKey: identifies the OS build and adapter; a cached result with the same key is reused instead of
-    ///     testing again. `nil` = do not cache (always test at start).
+    ///   - adapter: the preferred provider (MediaRemote adapter).
+    ///   - adapterSelfTest: the adapter's `test`. It may publish a fake now-playing entry, so it runs only when the
+    ///     stream could not prove itself (see `AdapterCheckPolicy`).
+    ///   - selfTestKey: identifies the OS build and adapter for the cached result. `nil` = never cache.
+    ///   - verifyAfter: how long a stream started without a cached pass may stay silent before the self-test runs.
+    ///   - fallback: used when the adapter fails, but only once the user opted in (it may prompt for Automation).
     public init(
-        adapter: (any NowPlayingProvider)?, adapterSelfTest: @escaping @Sendable () async -> Bool,
-        selfTestKey: String? = nil, fallback: (any NowPlayingProvider)?, now: @escaping @MainActor () -> Date = { .now }
+        adapter: (any NowPlayingProvider)?, adapterSelfTest: @escaping @Sendable () async -> AdapterTestOutcome,
+        selfTestKey: String? = nil, verifyAfter: Duration = .seconds(15), fallback: (any NowPlayingProvider)?,
+        now: @escaping @MainActor () -> Date = { .now },
+        sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
     ) {
         self.adapter = adapter; self.adapterSelfTest = adapterSelfTest; self.selfTestKey = selfTestKey
-        self.fallback = fallback; self.now = now
+        self.verifyAfter = verifyAfter; self.fallback = fallback; self.now = now; self.sleep = sleep
     }
 
     /// Adapter from the app bundle (if present) with the Spotify/Music fallback.
     public static func live() -> NowPlayingModule {
         let locations = AdapterLocations.inBundle()
-        let selfTest: @Sendable () async -> Bool = if let locations { { await AdapterProvider.selfTest(locations) } } else { { false } }
+        let selfTest: @Sendable () async -> AdapterTestOutcome =
+            if let locations { { await AdapterProvider.selfTest(locations) } } else { { .failed } }
         return NowPlayingModule(
             adapter: locations.map { AdapterProvider(locations: $0) }, adapterSelfTest: selfTest,
             selfTestKey: locations.map { AdapterCheck.key(os: ProcessInfo.processInfo.operatingSystemVersionString, adapter: $0.identity) },
@@ -124,7 +132,7 @@ public final class NowPlayingModule: NotchModule {
     /// A fixed track with generated artwork. Spawns nothing and sends no Apple Events.
     public static func sample(_ state: NowPlayingState? = SampleProvider.track) -> NowPlayingModule {
         let provider = SampleProvider(state: state)
-        let module = NowPlayingModule(adapter: provider, adapterSelfTest: { true }, fallback: nil)
+        let module = NowPlayingModule(adapter: provider, adapterSelfTest: { .passed }, fallback: nil)
         module.activate(provider)
         return module
     }
@@ -133,23 +141,36 @@ public final class NowPlayingModule: NotchModule {
         guard !running else { return }
         running = true
         settings = context.settings
-        mayPrompt = context.mayPrompt
         log = context.log
-        if adapter == nil {
-            select(adapterPassed: false)
-        } else if let key = selfTestKey, let cached = settings?.get(Self.adapterCheck), cached.key == key {
+        retriedAfterGiveUp = false
+        guard adapter != nil else {
+            // `mayPrompt` is honoured only here, while the user is enabling the module.
+            select(adapterPassed: false, mayPrompt: context.mayPrompt)
+            context.log.notice("started")
+            return
+        }
+        let cached = settings?.get(Self.adapterCheck)
+        switch AdapterCheckPolicy.decide(cached: cached, key: selfTestKey, now: now()) {
+        case .usePass:
             lastCheck = cached
-            select(adapterPassed: cached.passed)
-        } else {
-            runSelfTest()
+            select(adapterPassed: true)
+        case .useFail:
+            lastCheck = cached
+            select(adapterPassed: false, mayPrompt: context.mayPrompt)
+        case .verify:
+            // Stream first: a real track proves the adapter without the self-test's fake entry.
+            select(adapterPassed: true)
+            scheduleVerification()
         }
         context.log.notice("started")
     }
 
     public func stop() {
         running = false
+        verifying = false
         selection?.cancel()
         selection = nil
+        isChecking = false
         active?.stop()
         active = nil
         phase = .idle
@@ -160,20 +181,62 @@ public final class NowPlayingModule: NotchModule {
     public func checkAgain() {
         guard adapter != nil else { return }
         retriedAfterGiveUp = false
-        runSelfTest()
+        verifying = false
+        runSelfTest { [weak self] outcome in
+            guard let self else { return }
+            switch outcome {
+            case .passed: self.select(adapterPassed: true)
+            case .failed: self.select(adapterPassed: false)
+            case .unknown: break
+            }
+        }
     }
 
-    private func runSelfTest(then decide: (@MainActor (Bool) -> Void)? = nil) {
+    private func scheduleVerification() {
+        verifying = true
+        selection?.cancel()
+        let sleep = sleep, delay = verifyAfter
+        selection = Task { [weak self] in
+            do { try await sleep(delay) } catch { return }
+            guard !Task.isCancelled, let self, self.verifying else { return }
+            self.runSelfTest { [weak self] outcome in
+                guard let self, self.verifying else { return }
+                self.verifying = false
+                if outcome == .failed {
+                    self.log.error("adapter self-test failed; leaving the stream")
+                    self.select(adapterPassed: false)
+                }
+            }
+        }
+    }
+
+    /// The stream delivered a real track: the adapter works. Cached like a passing self-test.
+    private func confirmAdapter() {
+        verifying = false
+        selection?.cancel()
+        selection = nil
+        isChecking = false
+        record(.passed)
+    }
+
+    private func record(_ outcome: AdapterTestOutcome) {
+        guard outcome != .unknown else { return }
+        let check = AdapterCheck(key: selfTestKey ?? "", passed: outcome == .passed, checkedAt: now())
+        lastCheck = check
+        if selfTestKey != nil { settings?.set(Self.adapterCheck, check) }
+    }
+
+    private func runSelfTest(then decide: @escaping @MainActor (AdapterTestOutcome) -> Void) {
         selection?.cancel()
         isChecking = true
         selection = Task { [weak self, adapterSelfTest] in
-            let passed = await adapterSelfTest()
+            let outcome = await adapterSelfTest()
             guard !Task.isCancelled, let self else { return }
             self.isChecking = false
-            let check = AdapterCheck(key: self.selfTestKey ?? "", passed: passed, checkedAt: self.now())
-            self.lastCheck = check
-            if self.selfTestKey != nil { self.settings?.set(Self.adapterCheck, check) }
-            if let decide { decide(passed) } else { self.select(adapterPassed: passed) }
+            self.log.notice("adapter self-test: \(String(describing: outcome), privacy: .public)")
+            self.record(outcome)
+            // A stopped module only records the result; it never starts a provider.
+            if self.running { decide(outcome) }
         }
     }
 
@@ -181,6 +244,7 @@ public final class NowPlayingModule: NotchModule {
     public func connect() {
         settings?.set(Self.automationConsent, true)
         guard let fallback else { return }
+        verifying = false
         activate(fallback)
     }
 
@@ -195,7 +259,8 @@ public final class NowPlayingModule: NotchModule {
         active?.send(command)
     }
 
-    func select(adapterPassed: Bool) {
+    /// - Parameter mayPrompt: only `start` passes the context's value; later decisions never prompt on their own.
+    func select(adapterPassed: Bool, mayPrompt: Bool = false) {
         let choice = NowPlayingSelection.choose(
             adapterPassed: adapterPassed && adapter != nil, hasFallback: fallback != nil,
             consented: settings?.get(Self.automationConsent) ?? false, mayPrompt: mayPrompt
@@ -204,8 +269,9 @@ public final class NowPlayingModule: NotchModule {
         switch choice {
         case .adapter: if let adapter { activate(adapter) }
         case .appleScript: if let fallback { activate(fallback) }
-        case .needsConnect: phase = .needsConnect
-        case .unavailable: phase = .unavailable
+        case .needsConnect, .unavailable:
+            if let active, active === adapter { active.stop(); self.active = nil; apply(nil) }
+            phase = choice == .needsConnect ? .needsConnect : .unavailable
         }
     }
 
@@ -228,10 +294,12 @@ public final class NowPlayingModule: NotchModule {
             log.error("adapter stream gave up; testing the adapter again")
             active = nil
             phase = .idle
-            runSelfTest { [weak self] passed in
+            verifying = false
+            runSelfTest { [weak self] outcome in
                 guard let self else { return }
-                // One more stream attempt per session after a passing retest; otherwise the fallback path.
-                let retry = passed && !self.retriedAfterGiveUp
+                // One more stream attempt per session after a passing retest; otherwise the fallback path
+                // (which never prompts here: only a click on Connect may).
+                let retry = outcome == .passed && !self.retriedAfterGiveUp
                 if retry { self.retriedAfterGiveUp = true }
                 self.select(adapterPassed: retry)
             }
@@ -242,6 +310,7 @@ public final class NowPlayingModule: NotchModule {
     }
 
     private func apply(_ new: NowPlayingState?) {
+        if new != nil, verifying, let active, active === adapter { confirmAdapter() }
         guard new != state else { return }
         Motion.animate(Motion.morph) { state = new }
         let activity = NowPlayingActivity.make(new, updatedAt: now())
@@ -269,4 +338,34 @@ public struct AdapterCheck: Codable, Sendable, Equatable {
     public init(key: String, passed: Bool, checkedAt: Date) { self.key = key; self.passed = passed; self.checkedAt = checkedAt }
 
     public static func key(os: String, adapter: String) -> String { "\(os)|\(adapter)" }
+}
+
+/// Result of the adapter's `test` command.
+public enum AdapterTestOutcome: Sendable, Equatable {
+    case passed
+    case failed
+    /// Timed out or could not be launched (e.g. a loaded login): says nothing about MediaRemote.
+    case unknown
+}
+
+/// What `start` does with a cached self-test result. Pure.
+public enum AdapterCheckPolicy {
+    public enum Decision: Sendable, Equatable {
+        /// Matching pass: stream right away, no test.
+        case usePass
+        /// Recent matching failure: fallback path, no test.
+        case useFail
+        /// No usable result: start the stream and confirm it (a real track, else the self-test after a delay).
+        case verify
+    }
+
+    /// How long a failure is trusted. Passes are trusted until the key changes.
+    public static let failureLifetime: TimeInterval = 3600
+
+    public static func decide(cached: AdapterCheck?, key: String?, now: Date) -> Decision {
+        guard let key, let cached, cached.key == key else { return .verify }
+        if cached.passed { return .usePass }
+        let age = now.timeIntervalSince(cached.checkedAt)
+        return age >= 0 && age < failureLifetime ? .useFail : .verify
+    }
 }

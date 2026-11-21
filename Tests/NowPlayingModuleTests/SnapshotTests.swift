@@ -21,13 +21,13 @@ import Testing
         await plainCard.start(env.context(for: .nowPlaying))
         env.settings.set(NowPlayingModule.ambientArtwork, false)
 
-        let connect = NowPlayingModule(adapter: nil, adapterSelfTest: { false }, fallback: FakeProvider(.appleScript))
+        let connect = NowPlayingModule(adapter: nil, adapterSelfTest: { .failed }, fallback: FakeProvider(.appleScript))
         connect.select(adapterPassed: false)
         let deniedFallback = FakeProvider(.appleScript)
-        let denied = NowPlayingModule(adapter: nil, adapterSelfTest: { false }, fallback: deniedFallback)
+        let denied = NowPlayingModule(adapter: nil, adapterSelfTest: { .failed }, fallback: deniedFallback)
         denied.connect()
         deniedFallback.onFailure?(.notAuthorized(bundleID: "com.spotify.client"))
-        let unavailable = NowPlayingModule(adapter: nil, adapterSelfTest: { false }, fallback: nil)
+        let unavailable = NowPlayingModule(adapter: nil, adapterSelfTest: { .failed }, fallback: nil)
         unavailable.select(adapterPassed: false)
 
         let cases: [(String, NowPlayingModule)] = [

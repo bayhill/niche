@@ -17,7 +17,7 @@ import Testing
     @Test func adapterChosenWhenSelfTestPasses() async throws {
         let env = try TestEnvironment(); defer { env.cleanUp() }
         let adapter = FakeProvider(.mediaRemote), fallback = FakeProvider(.appleScript)
-        let module = NowPlayingModule(adapter: adapter, adapterSelfTest: { true }, fallback: fallback)
+        let module = NowPlayingModule(adapter: adapter, adapterSelfTest: { .passed }, fallback: fallback)
         await module.start(env.context(for: .nowPlaying))
         #expect(await eventually { module.activeSource == .mediaRemote })
         #expect(adapter.startCount == 1)
@@ -30,9 +30,10 @@ import Testing
     @Test func fallbackWaitsForConnectThenStarts() async throws {
         let env = try TestEnvironment(); defer { env.cleanUp() }
         let adapter = FakeProvider(.mediaRemote), fallback = FakeProvider(.appleScript)
-        let module = NowPlayingModule(adapter: adapter, adapterSelfTest: { false }, fallback: fallback)
+        let module = NowPlayingModule(adapter: adapter, adapterSelfTest: { .failed }, verifyAfter: .zero, fallback: fallback)
         await module.start(env.context(for: .nowPlaying))
         #expect(await eventually { module.phase == .needsConnect })
+        #expect(adapter.stopCount == 1) // the unproven stream was stopped
         #expect(fallback.startCount == 0) // no Automation prompt without consent
         module.connect()
         #expect(module.activeSource == .appleScript)
@@ -44,25 +45,27 @@ import Testing
         let env = try TestEnvironment(); defer { env.cleanUp() }
         env.settings.set(NowPlayingModule.automationConsent, true)
         let fallback = FakeProvider(.appleScript)
-        let module = NowPlayingModule(adapter: nil, adapterSelfTest: { true }, fallback: fallback)
+        let module = NowPlayingModule(adapter: nil, adapterSelfTest: { .passed }, fallback: fallback)
         await module.start(env.context(for: .nowPlaying))
         #expect(await eventually { module.activeSource == .appleScript })
 
+        // mayPrompt applies to decisions made during start, e.g. a recent cached failure.
         let env2 = try TestEnvironment(); defer { env2.cleanUp() }
+        env2.settings.set(NowPlayingModule.adapterCheck, AdapterCheck(key: "k", passed: false, checkedAt: .now))
         let fallback2 = FakeProvider(.appleScript)
-        let module2 = NowPlayingModule(adapter: FakeProvider(.mediaRemote), adapterSelfTest: { false }, fallback: fallback2)
+        let module2 = NowPlayingModule(adapter: FakeProvider(.mediaRemote), adapterSelfTest: { .failed }, selfTestKey: "k", fallback: fallback2)
         await module2.start(env2.context(for: .nowPlaying, mayPrompt: true))
-        #expect(await eventually { module2.activeSource == .appleScript })
+        #expect(module2.activeSource == .appleScript)
     }
 
     @Test func adapterGivingUpRetestsAndRetries() async throws {
         let env = try TestEnvironment(); defer { env.cleanUp() }
         let adapter = FakeProvider(.mediaRemote), fallback = FakeProvider(.appleScript)
-        let module = NowPlayingModule(adapter: adapter, adapterSelfTest: { true }, fallback: fallback)
+        let module = NowPlayingModule(adapter: adapter, adapterSelfTest: { .passed }, fallback: fallback)
         await module.start(env.context(for: .nowPlaying))
         #expect(await eventually { module.activeSource == .mediaRemote })
         adapter.onFailure?(.gaveUp)
-        // Retest passes (stub returns true): one more stream attempt.
+        // Retest passes: one more stream attempt.
         #expect(await eventually { adapter.startCount == 2 && module.activeSource == .mediaRemote })
     }
 
@@ -84,7 +87,7 @@ import Testing
         let env = try TestEnvironment(); defer { env.cleanUp() }
         var clock = Date(timeIntervalSince1970: 1000)
         let adapter = FakeProvider(.mediaRemote)
-        let module = NowPlayingModule(adapter: adapter, adapterSelfTest: { true }, fallback: nil, now: { clock })
+        let module = NowPlayingModule(adapter: adapter, adapterSelfTest: { .passed }, fallback: nil, now: { clock })
         await module.start(env.context(for: .nowPlaying))
         #expect(await eventually { module.activeSource == .mediaRemote })
         var state = NowPlayingState(title: "A", isPlaying: true, elapsed: 1)

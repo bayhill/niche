@@ -36,7 +36,7 @@ func event(
     @Test func overlappingSameStartPrefersJoinable() {
         let events = [
             event("b-plain", start: 15),
-            event("a-zoom", start: 15, notes: "https://acme.zoom.us/j/1"),
+            event("a-zoom", start: 15, notes: "https://acme.zoom.us/j/812345678"),
         ]
         let m = NextMeetingSelector.select(events, now: t0)
         #expect(m?.event.id == "a-zoom")
