@@ -1,0 +1,29 @@
+<!-- @dsCard group="Content" height=104 subtitle="A live countdown to a date" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>CountdownText — preview</title>
+</head>
+<body>
+<div class="nx-stage nx-stage--center" style="height:104px">
+<div class="nx-glass nx-glass--row" style="gap:22px"><span class="numeric nx-numeric" data-countdown="3900">1h 5m</span><span class="numeric nx-numeric nx-tint-accent" data-countdown="725">12m</span><span class="numeric nx-numeric nx-tint-warning" data-countdown="45">45s</span><span class="display nx-display" data-countdown="8">8s</span></div>
+</div>
+<script>
+(function () {
+
+  // CountdownText: Format.countdown — "1h 5m", "12m", "45s", "now"
+  function nxCountdown(s) {
+    s = Math.ceil(s); if (s <= 0) return 'now'; if (s < 60) return s + 's';
+    var m = Math.ceil(s / 60); if (m < 60) return m + 'm';
+    var h = Math.floor(m / 60), r = m % 60; return r ? h + 'h ' + r + 'm' : h + 'h';
+  }
+  document.querySelectorAll('[data-countdown]').forEach(function (el) {
+    var end = Date.now() + Number(el.dataset.countdown) * 1000;
+    function tick() { el.textContent = nxCountdown((end - Date.now()) / 1000); }
+    tick(); setInterval(tick, 1000);
+  });
+})();
+</script>
+</body>
+</html>
