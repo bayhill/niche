@@ -174,6 +174,21 @@ private func activity(_ id: String, _ p: LiveActivity.Priority, updated: TimeInt
         #expect(Format.saving(0.001) == "0%")
     }
 
+    @Test func playback() {
+        #expect(Format.playback(seconds: 84) == "1:24")
+        #expect(Format.playback(seconds: 0) == "0:00")
+        #expect(Format.playback(seconds: 3723) == "1:02:03")
+        #expect(Format.playback(seconds: 137, remaining: true) == "\u{2212}2:17")
+        #expect(Format.playback(seconds: -.infinity) == "0:00")
+    }
+
+    @Test func age() {
+        #expect(Format.age(seconds: 12) == "now")
+        #expect(Format.age(seconds: 4 * 60 + 59) == "4m")
+        #expect(Format.age(seconds: 3600) == "1h")
+        #expect(Format.age(seconds: 3 * 86400 + 5) == "3d")
+    }
+
     @Test func countdown() {
         #expect(Format.countdown(seconds: -5) == "now")
         #expect(Format.countdown(seconds: 45) == "45s")

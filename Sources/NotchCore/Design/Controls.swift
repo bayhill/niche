@@ -22,7 +22,7 @@ public struct GlassButtonStyle: ButtonStyle {
     private var glass: Glass {
         switch prominence {
         case .standard: .regular.interactive()
-        case .accent: .regular.tint(Tokens.Colors.accent.opacity(0.75)).interactive()
+        case .accent: .regular.tint(Tokens.Colors.accentGlass).interactive()
         }
     }
 }

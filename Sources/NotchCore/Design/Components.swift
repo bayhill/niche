@@ -120,6 +120,54 @@ public struct ProgressRing: View {
     }
 }
 
+/// Indeterminate ring for work whose progress is unknown (a single file converting). Rests under Reduce Motion.
+public struct SpinnerRing: View {
+    private let size: CGFloat
+    private let lineWidth: CGFloat
+    private let tint: TintRole
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    public init(size: CGFloat = 16, lineWidth: CGFloat = 2.5, tint: TintRole = .accent) {
+        self.size = size; self.lineWidth = lineWidth; self.tint = tint
+    }
+
+    public var body: some View {
+        TimelineView(.animation(paused: reduceMotion)) { context in
+            let turn = reduceMotion ? 0 : context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.1) / 1.1
+            ZStack {
+                Circle().stroke(Tokens.Colors.cardStroke, lineWidth: lineWidth)
+                Circle().trim(from: 0, to: 0.7)
+                    .stroke(tint.color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                    .rotationEffect(.degrees(-90 + turn * 360))
+            }
+            .frame(width: size, height: size)
+        }
+        .accessibilityElement()
+        .accessibilityLabel("In progress")
+    }
+}
+
+/// Thin horizontal bar for a position in time (a track's playhead). Not a control.
+public struct PositionBar: View {
+    private let progress: Double
+
+    public init(progress: Double) { self.progress = min(1, max(0, progress.isFinite ? progress : 0)) }
+
+    public var body: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                Capsule().fill(Tokens.Colors.cardStroke)
+                Capsule().fill(Tokens.Colors.textPrimary).frame(width: max(3, proxy.size.width * progress))
+            }
+        }
+        .frame(height: 3)
+        .motion(Motion.morph, value: progress)
+        .accessibilityElement()
+        .accessibilityLabel("Position")
+        .accessibilityValue("\(Int((progress * 100).rounded())) percent")
+    }
+}
+
 /// Small coloured dot; pulses to ask for attention.
 public struct StatusDot: View {
     private let tint: TintRole

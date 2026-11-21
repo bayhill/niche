@@ -21,9 +21,12 @@ exact change you need; do not edit it and do not work around it with a private c
 
 1. **Read `Sources/NotchCore` first.** It is the contract: `NotchModule`, `LiveActivity`, drop routing, services,
    `SettingsStore`, `AppDirectories`, and the design kit in `Sources/NotchCore/Design`.
-2. **Design kit only.** Views are built from `GlassCard`, `GlassButton`, `GlassIconButton`, `SectionHeader`, `ResultRow`,
-   `EmptyState`, `ProgressRing`, `StatusDot`, `EqualizerBars`, `CountdownText`, `Text(...).notchStyle(_)`, `Tokens`,
-   `PanelLayout`, and `Motion`. No literal colours, fonts, corner radii, materials or animation curves in module code.
+2. **Design kit only.** Views are built from `GlassCard` (including `ambient:` for Now Playing), `GlassButton`,
+   `GlassIconButton`, `RowButtonStyle`, `SectionHeader`, `ResultRow`, `EmptyState`, `ProgressRing`, `SpinnerRing`,
+   `PositionBar`, `StatusDot`, `EqualizerBars`, `CountdownText`, `Text(...).notchStyle(_)`, `Format`, `Tokens`,
+   `PanelLayout`, and `Motion`. `design-system/` describes the kit, the content rules (sentence case, no "you"/"we",
+   no exclamation marks, empty states that name the next action) and the intended module layouts; the Swift kit is
+   the source of truth where they differ. No literal colours, fonts, corner radii, materials or animation curves in module code.
    Animate with `.motion(Motion.x, value:)`, `Motion.animate`, `.motionAppear(index)`; SF Symbol effects and
    `contentTransition(.numericText())` are encouraged. Keep it simple: few controls, generous spacing.
 3. **A dashboard card fills the frame it is given** (`PanelLayout.cardSize(for:)`); a page gets `PanelLayout.pageSize`.

@@ -13,6 +13,7 @@ public enum PanelPlacement: Sendable, Equatable {
 
 /// Home dashboard layout: three columns; the leading column is split in two.
 /// Approximate card sizes at the default panel size are in `PanelLayout`.
+/// Assignment: Next meeting `leadingTop`, Claude sessions `leadingBottom`, Now Playing `center`, Convert `trailing`.
 public enum DashboardSlot: Sendable, Equatable, CaseIterable {
     case leadingTop, leadingBottom, center, trailing
 }

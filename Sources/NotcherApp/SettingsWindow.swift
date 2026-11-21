@@ -59,7 +59,7 @@ private struct GeneralPane: View {
                 Section {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Welcome to Notcher").font(.title2.weight(.semibold))
-                        Text("Drag images onto the notch to convert them to WebP, right next to the original. Click the notch or press ⌃⌥N to open the panel. Each module on the left can be set up or switched off whenever you like.")
+                        Text("Drag images onto the notch to convert them to WebP, right next to the original. Click the notch or press ⌃⌥N to open the panel. Each module on the left can be set up or switched off at any time.")
                             .foregroundStyle(.secondary)
                         Button("Got it") { model.settings.set(AppSettings.onboarded, true) }
                             .buttonStyle(.borderedProminent).padding(.top, 4)

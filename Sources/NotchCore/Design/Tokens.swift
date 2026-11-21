@@ -8,9 +8,14 @@ public enum Tokens {
         public static let notchBlack = Color.black
         public static let textPrimary = Color.white
         public static let textSecondary = Color.white.opacity(0.62)
-        public static let textTertiary = Color.white.opacity(0.38)
+        /// 0.50 measures about 5.3:1 on black, clearing the 4.5:1 floor for the 10 pt section labels.
+        public static let textTertiary = Color.white.opacity(0.50)
         /// The single accent.
         public static let accent = Color(red: 0.25, green: 0.62, blue: 1.0)
+        /// Fill of a highlighted `GlassCard` (active drop target, selected item). Always paired with an accent outline.
+        public static let accentWash = accent.opacity(0.14)
+        /// Tint of the one accent `GlassButton`.
+        public static let accentGlass = accent.opacity(0.75)
         public static let success = Color(red: 0.30, green: 0.85, blue: 0.48)
         public static let warning = Color(red: 1.0, green: 0.66, blue: 0.20)
         /// Tint mixed into the panel's Liquid Glass.
@@ -21,6 +26,10 @@ public enum Tokens {
         public static let cardFillHover = Color.white.opacity(0.11)
         public static let cardStroke = Color.white.opacity(0.10)
         public static let hairline = Color.white.opacity(0.08)
+        /// Ambient artwork (`GlassCard(ambient:)`): how strongly blurred artwork blooms through a card,
+        /// and the dark veil laid over it so `textPrimary`/`textSecondary` stay readable on bright covers.
+        public static let ambientOpacity = 0.42
+        public static let ambientVeil = Color.black.opacity(0.30)
     }
 
     public enum Radius {

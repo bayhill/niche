@@ -49,17 +49,21 @@ public struct GlassCard<Content: View>: View {
     private let padding: CGFloat
     private let spacing: CGFloat
     private let highlighted: Bool
+    private let ambient: SendableImage?
     private let content: Content
 
     /// Children are stacked vertically, leading-aligned, and the card fills the frame it is given.
     /// - Parameters:
     ///   - spacing: vertical gap between children.
     ///   - highlighted: draws the accent outline (active drop target, selected item).
+    ///   - ambient: artwork whose colour blooms through the card, blurred and veiled so text stays readable.
+    ///     The only place content colour may tint a surface; reserved for Now Playing.
     public init(
         padding: CGFloat = Tokens.Spacing.m, spacing: CGFloat = Tokens.Spacing.s, highlighted: Bool = false,
-        @ViewBuilder content: () -> Content
+        ambient: SendableImage? = nil, @ViewBuilder content: () -> Content
     ) {
-        self.padding = padding; self.spacing = spacing; self.highlighted = highlighted; self.content = content()
+        self.padding = padding; self.spacing = spacing; self.highlighted = highlighted
+        self.ambient = ambient; self.content = content()
     }
 
     public var body: some View {
@@ -67,7 +71,22 @@ public struct GlassCard<Content: View>: View {
         VStack(alignment: .leading, spacing: spacing) { content }
             .padding(padding)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .background(highlighted ? Tokens.Colors.accent.opacity(0.14) : Tokens.Colors.cardFill, in: shape)
+            .background {
+                ZStack {
+                    (highlighted ? Tokens.Colors.accentWash : Tokens.Colors.cardFill)
+                    if let ambient, !highlighted {
+                        Image(decorative: ambient.cgImage, scale: 1)
+                            .resizable().aspectRatio(contentMode: .fill)
+                            .blur(radius: 30, opaque: true).saturation(1.7)
+                            .opacity(Tokens.Colors.ambientOpacity)
+                            .overlay(Tokens.Colors.ambientVeil)
+                            .transition(.opacity)
+                            .id(ObjectIdentifier(ambient.cgImage))
+                    }
+                }
+                .clipShape(shape)
+                .motion(Motion.appear, value: ambient)
+            }
             .overlay {
                 shape.strokeBorder(highlighted ? Tokens.Colors.accent : Tokens.Colors.cardStroke, lineWidth: highlighted ? 1.5 : 1)
             }

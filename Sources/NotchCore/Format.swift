@@ -22,6 +22,23 @@ public enum Format {
         return savedFraction > 0 ? "\u{2212}\(pct)%" : "+\(pct)%"
     }
 
+    /// Track position: "1:24", "1:02:03". With `remaining`, a real minus sign in front: "\u{2212}2:17".
+    public static func playback(seconds: TimeInterval, remaining: Bool = false) -> String {
+        let total = Int(max(0, seconds.isFinite ? seconds : 0).rounded(.down))
+        let h = total / 3600, m = (total % 3600) / 60, s = total % 60
+        let body = h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%d:%02d", m, s)
+        return remaining ? "\u{2212}" + body : body
+    }
+
+    /// How long ago something happened: "now" (under a minute), "4m", "1h", "3d". Rounds down.
+    public static func age(seconds: TimeInterval) -> String {
+        let s = Int(max(0, seconds.isFinite ? seconds : 0))
+        if s < 60 { return "now" }
+        if s < 3600 { return "\(s / 60)m" }
+        if s < 86400 { return "\(s / 3600)h" }
+        return "\(s / 86400)d"
+    }
+
     /// "1h 5m", "12m", "45s", "now" (also for past dates).
     public static func countdown(seconds: TimeInterval) -> String {
         let s = Int(seconds.rounded(.up))
