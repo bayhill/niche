@@ -6,6 +6,8 @@ public struct NotchSurface<S: Shape>: View {
     private let shape: S
     private let capHeight: CGFloat
     private let glassAmount: Double
+    /// Distance over which the black cap fades into glass.
+    public static var fadeHeight: CGFloat { 56 }
 
     /// - Parameters:
     ///   - shape: the animated notch outline.
@@ -21,11 +23,20 @@ public struct NotchSurface<S: Shape>: View {
             Color.clear
                 .glassEffect(.regular.tint(Tokens.Colors.glassTint), in: shape)
                 .opacity(glassAmount > 0 ? 1 : 0)
-            VStack(spacing: 0) {
-                Color.black.frame(height: capHeight)
-                LinearGradient(colors: [.black, .black.opacity(floor)], startPoint: .top, endPoint: .bottom)
-                    .frame(height: 56)
-                Color.black.opacity(floor)
+            // One gradient with stops placed in points, so the surface can be any height (down to the bare notch).
+            GeometryReader { proxy in
+                let height = max(proxy.size.height, 1)
+                let capStop = min(1, capHeight / height)
+                let fadeStop = min(1, (capHeight + Self.fadeHeight) / height)
+                LinearGradient(
+                    stops: [
+                        .init(color: .black, location: 0),
+                        .init(color: .black, location: capStop),
+                        .init(color: .black.opacity(floor), location: fadeStop),
+                        .init(color: .black.opacity(floor), location: 1),
+                    ],
+                    startPoint: .top, endPoint: .bottom
+                )
             }
             .clipShape(shape)
         }
