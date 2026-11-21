@@ -77,6 +77,8 @@ public enum NotchTextStyle: Sendable, CaseIterable {
     case numeric
     /// 20 semibold rounded, primary. One hero figure per card at most.
     case display
+    /// 11 medium. Text in a live-activity wing beside the closed notch; the renderer sets the colour.
+    case wing
 
     public var font: Font {
         switch self {
@@ -86,12 +88,13 @@ public enum NotchTextStyle: Sendable, CaseIterable {
         case .label: .system(size: 10, weight: .semibold)
         case .numeric: .system(size: 12, weight: .medium).monospacedDigit()
         case .display: .system(size: 20, weight: .semibold, design: .rounded).monospacedDigit()
+        case .wing: .system(size: 11, weight: .medium)
         }
     }
 
     public var color: Color {
         switch self {
-        case .title, .body, .numeric, .display: Tokens.Colors.textPrimary
+        case .title, .body, .numeric, .display, .wing: Tokens.Colors.textPrimary
         case .caption: Tokens.Colors.textSecondary
         case .label: Tokens.Colors.textTertiary
         }
@@ -107,8 +110,11 @@ public extension View {
 /// Sizes of the notch's states, in points. The notch band (menu-bar strip, height = notch height) sits on top
 /// of the content sizes given here.
 public enum PanelLayout {
-    /// Width of each live-activity wing beside the closed notch.
+    /// Width of each live-activity wing beside the closed notch when it holds only a glyph.
     public static let wingWidth: CGFloat = 40
+    /// Widest a wing may grow when the activity carries `leadingText`/`trailingText`. Both wings take the same
+    /// width (that of the longer side) so the notch stays symmetric.
+    public static let wingMaxWidth: CGFloat = 150
     /// How much the notch swells on hover.
     public static let hoverGrowth = CGSize(width: 12, height: 6)
     /// Drop target shown while a drag is near the notch.

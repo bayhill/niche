@@ -25,6 +25,12 @@ public struct LiveActivity: Identifiable, Equatable, Sendable {
     public var leading: ActivityGlyph
     /// Right wing, optional. Keep text to about 6 characters.
     public var trailing: ActivityGlyph?
+    /// Optional line of text in the left wing, between the leading glyph and the notch (a track title).
+    /// One line, primary colour, truncated with an ellipsis. The wings widen to fit, up to `PanelLayout.wingMaxWidth`.
+    public var leadingText: String?
+    /// Optional line of text in the right wing, between the notch and the trailing glyph (an artist).
+    /// One line, secondary colour, truncated with an ellipsis.
+    public var trailingText: String?
     /// After this instant the activity is ignored even if the module has not cleared it.
     public var expiresAt: Date?
     /// Tie-breaker between equal priorities: most recently updated wins.
@@ -33,9 +39,11 @@ public struct LiveActivity: Identifiable, Equatable, Sendable {
 
     public init(
         id: String, module: ModuleID, priority: Priority, leading: ActivityGlyph, trailing: ActivityGlyph? = nil,
+        leadingText: String? = nil, trailingText: String? = nil,
         expiresAt: Date? = nil, updatedAt: Date = .now, accessibilityLabel: String
     ) {
         self.id = id; self.module = module; self.priority = priority; self.leading = leading; self.trailing = trailing
+        self.leadingText = leadingText; self.trailingText = trailingText
         self.expiresAt = expiresAt; self.updatedAt = updatedAt; self.accessibilityLabel = accessibilityLabel
     }
 }
