@@ -24,6 +24,11 @@ enum LoginItem {
 
     static func setEnabled(_ enabled: Bool) {
         let log = Log.logger("login")
+        // Never register a development binary (`swift run`) to start at login.
+        guard !enabled || Bundle.main.bundleURL.pathExtension == "app" else {
+            log.notice("not running from an app bundle; launch at login left unchanged")
+            return
+        }
         if enabled {
             do {
                 try SMAppService.mainApp.register()

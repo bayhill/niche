@@ -46,8 +46,8 @@ public enum ActivityGlyph: Equatable, Sendable {
     case symbol(String, tint: TintRole = .primary, pulse: Bool = false)
     /// Determinate ring, 0...1.
     case progress(Double)
-    /// Short text, monospaced digits.
-    case text(String)
+    /// Short text, monospaced digits. Tint carries meaning: `secondary` for neutral information, `success`/`warning` for outcomes.
+    case text(String, tint: TintRole = .primary)
     /// Live countdown ("12m", "45s") to a date.
     case countdown(to: Date)
     /// Small rounded thumbnail (album art, image preview).

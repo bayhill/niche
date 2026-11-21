@@ -204,9 +204,10 @@ struct ActivityGlyphView: View {
                 .frame(width: 18, height: 18)
         case .progress(let value):
             ProgressRing(progress: value, size: 16, lineWidth: 2.5)
-        case .text(let text):
+        case .text(let text, let tint):
             Text(text)
-                .notchStyle(.numeric)
+                .font(NotchTextStyle.numeric.font)
+                .foregroundStyle(tint.color)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
                 .contentTransition(.numericText())

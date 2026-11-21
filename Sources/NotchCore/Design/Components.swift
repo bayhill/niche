@@ -28,7 +28,9 @@ public extension SectionHeader where Trailing == EmptyView {
 }
 
 /// One line item: thumbnail or symbol, title, detail, trailing figure.
-public struct ResultRow: View {
+/// The leading 26 pt slot shows a thumbnail, else a symbol, or any custom view (a `ProgressRing` while working).
+public struct ResultRow<Leading: View>: View {
+    private let leading: Leading?
     private let thumbnail: SendableImage?
     private let symbol: String
     private let symbolTint: TintRole
@@ -37,18 +39,21 @@ public struct ResultRow: View {
     private let trailing: String?
     private let trailingTint: TintRole
 
+    /// A row whose leading slot holds a custom view, centred in the 26 pt square.
     public init(
-        thumbnail: SendableImage? = nil, symbol: String = "doc", symbolTint: TintRole = .secondary,
-        title: String, detail: String? = nil, trailing: String? = nil, trailingTint: TintRole = .secondary
+        title: String, detail: String? = nil, trailing: String? = nil, trailingTint: TintRole = .secondary,
+        @ViewBuilder leading: () -> Leading
     ) {
-        self.thumbnail = thumbnail; self.symbol = symbol; self.symbolTint = symbolTint; self.title = title
-        self.detail = detail; self.trailing = trailing; self.trailingTint = trailingTint
+        self.leading = leading(); self.thumbnail = nil; self.symbol = "doc"; self.symbolTint = .secondary
+        self.title = title; self.detail = detail; self.trailing = trailing; self.trailingTint = trailingTint
     }
 
     public var body: some View {
         HStack(spacing: Tokens.Spacing.s) {
             Group {
-                if let thumbnail {
+                if let leading {
+                    leading.frame(maxWidth: .infinity, maxHeight: .infinity).background(Tokens.Colors.cardFill)
+                } else if let thumbnail {
                     Image(decorative: thumbnail.cgImage, scale: 2).resizable().aspectRatio(contentMode: .fill)
                 } else {
                     Image(systemName: symbol).font(.system(size: 12, weight: .medium)).foregroundStyle(symbolTint.color)
@@ -72,17 +77,42 @@ public struct ResultRow: View {
     }
 }
 
+public extension ResultRow where Leading == EmptyView {
+    /// A row whose leading slot shows `thumbnail`, or `symbol` when there is none.
+    init(
+        thumbnail: SendableImage? = nil, symbol: String = "doc", symbolTint: TintRole = .secondary,
+        title: String, detail: String? = nil, trailing: String? = nil, trailingTint: TintRole = .secondary
+    ) {
+        self.leading = nil; self.thumbnail = thumbnail; self.symbol = symbol; self.symbolTint = symbolTint
+        self.title = title; self.detail = detail; self.trailing = trailing; self.trailingTint = trailingTint
+    }
+}
+
 /// Centered placeholder for a card with nothing to show.
 public struct EmptyState: View {
     private let symbol: String
     private let title: String
     private let message: String?
+    private let compact: Bool
 
-    public init(symbol: String, title: String, message: String? = nil) {
-        self.symbol = symbol; self.title = title; self.message = message
+    /// - Parameter compact: one line (symbol beside the title, no message), for half-height cards.
+    public init(symbol: String, title: String, message: String? = nil, compact: Bool = false) {
+        self.symbol = symbol; self.title = title; self.message = message; self.compact = compact
     }
 
     public var body: some View {
+        if compact {
+            HStack(spacing: Tokens.Spacing.s) {
+                Image(systemName: symbol).font(.system(size: 13, weight: .regular)).foregroundStyle(Tokens.Colors.textTertiary)
+                Text(title).notchStyle(.caption).lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            regular
+        }
+    }
+
+    private var regular: some View {
         VStack(spacing: Tokens.Spacing.xs) {
             Image(systemName: symbol).font(.system(size: 18, weight: .regular)).foregroundStyle(Tokens.Colors.textTertiary)
             Text(title).notchStyle(.caption).multilineTextAlignment(.center)
@@ -172,12 +202,15 @@ public struct PositionBar: View {
 public struct StatusDot: View {
     private let tint: TintRole
     private let pulsing: Bool
+    private let size: CGFloat
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    public init(_ tint: TintRole, pulsing: Bool = false) { self.tint = tint; self.pulsing = pulsing }
+    public init(_ tint: TintRole, pulsing: Bool = false, size: CGFloat = 7) {
+        self.tint = tint; self.pulsing = pulsing; self.size = size
+    }
 
     public var body: some View {
-        Circle().fill(tint.color).frame(width: 7, height: 7)
+        Circle().fill(tint.color).frame(width: size, height: size)
             .phaseAnimator(pulsing && !reduceMotion ? [1.0, 0.35] : [1.0]) { view, phase in
                 view.opacity(phase)
             } animation: { _ in .easeInOut(duration: 0.8) }
@@ -222,7 +255,8 @@ public struct CountdownText: View {
 }
 
 public extension View {
-    /// Lets the view be dragged out of the notch as files (to Finder, a browser upload field, Slack...).
+    /// Lets the view be dragged out of the notch as a file (to Finder, a browser upload field, Slack...).
+    /// One view drags one file: only the first URL is offered.
     @ViewBuilder func fileDragSource(_ urls: [URL]) -> some View {
         if let first = urls.first {
             onDrag { NSItemProvider(contentsOf: first) ?? NSItemProvider() }

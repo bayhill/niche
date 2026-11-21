@@ -88,7 +88,7 @@ private struct GeneralPane: View {
                         }
                     )) { Label(module.title, systemImage: module.symbol) }
                 }
-                Text("Changes to this list take effect the next time Notcher starts.").font(.footnote).foregroundStyle(.secondary)
+                Text("A module that is switched off stops completely and disappears from the notch.").font(.footnote).foregroundStyle(.secondary)
             }
             Section {
                 HStack {

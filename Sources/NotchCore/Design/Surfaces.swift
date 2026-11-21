@@ -50,20 +50,23 @@ public struct GlassCard<Content: View>: View {
     private let spacing: CGFloat
     private let highlighted: Bool
     private let ambient: SendableImage?
+    private let hoverable: Bool
     private let content: Content
+    @State private var hovering = false
 
     /// Children are stacked vertically, leading-aligned, and the card fills the frame it is given.
     /// - Parameters:
     ///   - spacing: vertical gap between children.
     ///   - highlighted: draws the accent outline (active drop target, selected item).
+    ///   - hoverable: the card lifts to `cardFillHover` under the pointer, for cards that act on click.
     ///   - ambient: artwork whose colour blooms through the card, blurred and veiled so text stays readable.
     ///     The only place content colour may tint a surface; reserved for Now Playing.
     public init(
         padding: CGFloat = Tokens.Spacing.m, spacing: CGFloat = Tokens.Spacing.s, highlighted: Bool = false,
-        ambient: SendableImage? = nil, @ViewBuilder content: () -> Content
+        ambient: SendableImage? = nil, hoverable: Bool = false, @ViewBuilder content: () -> Content
     ) {
         self.padding = padding; self.spacing = spacing; self.highlighted = highlighted
-        self.ambient = ambient; self.content = content()
+        self.ambient = ambient; self.hoverable = hoverable; self.content = content()
     }
 
     public var body: some View {
@@ -73,7 +76,7 @@ public struct GlassCard<Content: View>: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background {
                 ZStack {
-                    (highlighted ? Tokens.Colors.accentWash : Tokens.Colors.cardFill)
+                    (highlighted ? Tokens.Colors.accentWash : (hovering ? Tokens.Colors.cardFillHover : Tokens.Colors.cardFill))
                     if let ambient, !highlighted {
                         // Drawn as an overlay of a flexible clear view so the aspect-fill image never sizes the card.
                         Color.clear
@@ -97,6 +100,8 @@ public struct GlassCard<Content: View>: View {
             }
             .scaleEffect(highlighted ? 1.015 : 1)
             .motion(Motion.morph, value: highlighted)
+            .motion(Motion.quick, value: hovering)
+            .onHover { if hoverable { hovering = $0 } }
             .contentShape(shape)
     }
 }
