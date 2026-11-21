@@ -17,8 +17,8 @@ public final class CalendarModule: NotchModule {
     public let id = ModuleID.calendar
     public let title = "Calendar"
     public let symbol = "calendar"
-    public let placement = PanelPlacement.dashboard(.leadingBottom)
-    public let requirements = [PermissionRequirement(.calendar, rationale: "Shows your next meeting and joins it with one click.")]
+    public let placement = PanelPlacement.dashboard(.leadingTop)
+    public let requirements = [PermissionRequirement(.calendar, rationale: "Shows the next meeting beside the notch and joins it with one click.")]
 
     public private(set) var access: CalendarAccess
     public private(set) var meeting: NextMeeting?
@@ -87,7 +87,7 @@ public final class CalendarModule: NotchModule {
         wakeObserver = nil
     }
 
-    /// Shows the system calendar prompt (user clicked "Connect Calendar").
+    /// Shows the system calendar prompt (user clicked "Connect calendar").
     public func connect() async {
         access = await source.requestAccess()
         log.notice("calendar access: \(String(describing: self.access), privacy: .public)")

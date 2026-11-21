@@ -197,10 +197,13 @@ public final class AppleScriptProvider: NowPlayingProvider {
     }
 
     private func deliver(_ state: NowPlayingState?) {
-        // Position changes every poll; only publish what the card shows.
+        // Position changes every poll and the card extrapolates it; publish only what the extrapolation cannot know
+        // (a seek shows up as a jump of more than two seconds).
         if let state, let last, state.trackKey == last.trackKey, state.isPlaying == last.isPlaying, state.artwork == last.artwork,
-           state.bundleID == last.bundleID {
-            return
+           state.bundleID == last.bundleID, state.duration == last.duration {
+            let predicted = state.timestamp.flatMap { last.position(at: $0) }
+            if let predicted, let actual = state.elapsed, abs(predicted - actual) <= 2 { return }
+            if predicted == nil, state.elapsed == nil { return }
         }
         guard state != last else { return }
         last = state

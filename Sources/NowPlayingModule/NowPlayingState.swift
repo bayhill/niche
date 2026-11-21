@@ -15,14 +15,21 @@ public struct NowPlayingState: Equatable, Sendable {
     public var duration: TimeInterval?
     /// When `elapsed` was sampled.
     public var timestamp: Date?
+    /// Playback speed reported by the source (1 = normal). `nil` = unknown, treated as 1 while playing.
+    public var playbackRate: Double?
 
     public init(
         title: String, artist: String? = nil, album: String? = nil, artwork: SendableImage? = nil, isPlaying: Bool,
-        bundleID: String? = nil, elapsed: TimeInterval? = nil, duration: TimeInterval? = nil, timestamp: Date? = nil
+        bundleID: String? = nil, elapsed: TimeInterval? = nil, duration: TimeInterval? = nil, timestamp: Date? = nil,
+        playbackRate: Double? = nil
     ) {
         self.title = title; self.artist = artist; self.album = album; self.artwork = artwork; self.isPlaying = isPlaying
         self.bundleID = bundleID; self.elapsed = elapsed; self.duration = duration; self.timestamp = timestamp
+        self.playbackRate = playbackRate
     }
+
+    /// The live playhead at `now`, extrapolated from the last sample. `nil` when elapsed or duration is unknown.
+    public func position(at now: Date) -> TimeInterval? { PlaybackPosition.position(of: self, at: now) }
 
     /// Identifies the track (not its play state), for transitions.
     public var trackKey: String { [title, artist ?? "", album ?? ""].joined(separator: "\u{1F}") }
@@ -80,4 +87,27 @@ public protocol NowPlayingProvider: AnyObject {
     /// Idempotent. Terminates any child process.
     func stop()
     func send(_ command: MediaCommand)
+}
+
+/// Where the playhead is between source updates. Pure.
+public enum PlaybackPosition {
+    /// `elapsed` advanced by the time since `timestamp` times the playback rate while playing, frozen while paused,
+    /// clamped to `0...duration`. `nil` when elapsed or a positive duration is unknown, so the card hides the row.
+    public static func position(of state: NowPlayingState, at now: Date) -> TimeInterval? {
+        guard let elapsed = state.elapsed, elapsed.isFinite, let duration = state.duration, duration.isFinite, duration > 0 else {
+            return nil
+        }
+        var position = elapsed
+        if state.isPlaying, let timestamp = state.timestamp {
+            let rate = state.playbackRate.flatMap { $0.isFinite && $0 > 0 ? $0 : nil } ?? 1
+            position += max(0, now.timeIntervalSince(timestamp)) * rate
+        }
+        return min(duration, max(0, position))
+    }
+
+    /// 0...1 for a `PositionBar`.
+    public static func progress(of state: NowPlayingState, at now: Date) -> Double? {
+        guard let position = position(of: state, at: now), let duration = state.duration else { return nil }
+        return position / duration
+    }
 }

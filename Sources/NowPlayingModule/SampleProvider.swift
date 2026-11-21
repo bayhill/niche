@@ -26,8 +26,9 @@ public final class SampleProvider: NowPlayingProvider {
 
     public static var track: NowPlayingState {
         NowPlayingState(
-            title: "Weightless", artist: "Marconi Union", album: "Weightless (Ambient Transmissions Vol. 2)",
-            artwork: sampleArtwork, isPlaying: true, bundleID: "com.spotify.client", elapsed: 154, duration: 480, timestamp: .now
+            title: "Weightless", artist: "Marconi Union", album: "Ambient Transmissions Vol. 2",
+            artwork: sampleArtwork, isPlaying: true, bundleID: "com.spotify.client", elapsed: 154, duration: 480, timestamp: .now,
+            playbackRate: 1
         )
     }
 

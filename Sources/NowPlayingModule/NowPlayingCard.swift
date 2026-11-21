@@ -1,37 +1,59 @@
 import NotchCore
 import SwiftUI
 
+/// The centre dashboard card (210 × 184): header, artwork with track lines, live position, transport.
 struct NowPlayingCard: View {
     let module: NowPlayingModule
 
     var body: some View {
-        if let state = module.state {
-            GlassCard(padding: Tokens.Spacing.s) { TrackView(state: state, send: module.send) }
-        } else {
-            GlassCard { placeholder }
+        let state = module.state
+        GlassCard(ambient: module.ambientArtwork ? state?.artwork : nil) {
+            SectionHeader("Now Playing", symbol: "music.note") {
+                EqualizerBars(playing: state?.isPlaying ?? false)
+            }
+            if let state {
+                TrackView(state: state, send: module.send)
+                    .transition(.opacity)
+            } else {
+                placeholder.transition(.opacity)
+            }
         }
+        .motion(Motion.morph, value: state == nil)
     }
 
     @ViewBuilder private var placeholder: some View {
         switch module.phase {
         case .needsConnect:
-            HStack(spacing: Tokens.Spacing.s) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Now Playing").notchStyle(.title).lineLimit(1)
-                    Text("Spotify and Music").notchStyle(.caption).lineLimit(1)
-                }
-                Spacer(minLength: 0)
+            Prompt(symbol: "music.note", title: "Connect Spotify and Music", message: "Track and controls appear here") {
                 GlassButton("Connect", prominence: .accent) { module.connect() }
             }
-            .frame(maxHeight: .infinity)
-            .motionAppear()
         case .notAuthorized(let app):
-            EmptyState(symbol: "lock", title: "Notcher can't see \(app)", message: "Allow it in Privacy › Automation")
+            Prompt(symbol: "lock", title: "Allow Notcher to control \(app)", message: "Privacy & Security › Automation") {
+                GlassButton("Open System Settings") { module.openAutomationSettings() }
+            }
         case .unavailable:
-            EmptyState(symbol: "music.note", title: "Now Playing unavailable")
+            Prompt(symbol: "music.note", title: "Now Playing unavailable", message: "Check again in Settings") { EmptyView() }
+        case .active(.appleScript):
+            Prompt(symbol: "music.note", title: "Play something in Spotify or Music", message: nil) { EmptyView() }
         case .idle, .active:
-            EmptyState(symbol: "music.note", title: "Nothing playing").motionAppear()
+            Prompt(symbol: "music.note", title: "Play something in any app", message: nil) { EmptyView() }
         }
+    }
+}
+
+private struct Prompt<Action: View>: View {
+    let symbol: String
+    let title: String
+    let message: String?
+    @ViewBuilder let action: Action
+
+    var body: some View {
+        VStack(spacing: Tokens.Spacing.s) {
+            EmptyState(symbol: symbol, title: title, message: message).fixedSize(horizontal: false, vertical: true)
+            action.fixedSize()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .motionAppear()
     }
 }
 
@@ -40,37 +62,64 @@ private struct TrackView: View {
     let send: (MediaCommand) -> Void
 
     var body: some View {
-        HStack(spacing: Tokens.Spacing.m) {
-            Artwork(image: state.artwork)
-                .scaleEffect(state.isPlaying ? 1 : 0.9)
-                .opacity(state.isPlaying ? 1 : 0.75)
-                .motion(Motion.morph, value: state.isPlaying)
-                .notchHero(.nowPlaying)
-
-            VStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 1) {
+        VStack(alignment: .leading, spacing: Tokens.Spacing.s) {
+            HStack(alignment: .center, spacing: Tokens.Spacing.m) {
+                Artwork(image: state.artwork).notchHero(.nowPlaying)
+                VStack(alignment: .leading, spacing: 2) {
                     Text(state.title).notchStyle(.title).lineLimit(1)
                     if let artist = state.artist { Text(artist).notchStyle(.caption).lineLimit(1) }
+                    if let album = state.album { Text(album).notchStyle(.caption).lineLimit(1) }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .id(state.trackKey)
                 .transition(.blurReplace)
-                .padding(.top, Tokens.Spacing.xs)
-
-                Spacer(minLength: 0)
-
-                HStack(spacing: Tokens.Spacing.xs) {
-                    GlassIconButton("backward.fill", label: "Previous track", size: 24, tint: .secondary) { send(.previous) }
-                    GlassIconButton(state.isPlaying ? "pause.fill" : "play.fill", label: state.isPlaying ? "Pause" : "Play") {
-                        send(.togglePlayPause)
-                    }
-                    .contentTransition(.symbolEffect(.replace))
-                    GlassIconButton("forward.fill", label: "Next track", size: 24, tint: .secondary) { send(.next) }
-                }
             }
             .motion(Motion.morph, value: state.trackKey)
+
+            if state.position(at: state.timestamp ?? .now) != nil {
+                PositionRow(state: state).transition(.opacity)
+            }
+
+            Spacer(minLength: 0)
+
+            HStack(spacing: Tokens.Spacing.m) {
+                GlassIconButton("backward.fill", label: "Previous track", kind: .plain, size: 28, tint: .secondary) { send(.previous) }
+                GlassIconButton(state.isPlaying ? "pause.fill" : "play.fill", label: state.isPlaying ? "Pause" : "Play", size: 32) {
+                    send(.togglePlayPause)
+                }
+                .contentTransition(.symbolEffect(.replace))
+                GlassIconButton("forward.fill", label: "Next track", kind: .plain, size: 28, tint: .secondary) { send(.next) }
+            }
+            .frame(maxWidth: .infinity)
+            .motion(Motion.quick, value: state.isPlaying)
         }
         .accessibilityElement(children: .contain)
+    }
+}
+
+/// Elapsed, bar, remaining. Ticks about once a second while playing, frozen while paused.
+private struct PositionRow: View {
+    let state: NowPlayingState
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1, paused: !state.isPlaying)) { context in
+            let position = state.position(at: context.date) ?? 0
+            let duration = state.duration ?? 0
+            HStack(spacing: Tokens.Spacing.s) {
+                time(Format.playback(seconds: position))
+                PositionBar(progress: duration > 0 ? position / duration : 0)
+                time(Format.playback(seconds: duration - position, remaining: true))
+            }
+        }
+    }
+
+    private func time(_ text: String) -> some View {
+        Text(text)
+            .font(NotchTextStyle.caption.font.monospacedDigit())
+            .foregroundStyle(NotchTextStyle.caption.color)
+            .contentTransition(.numericText())
+            .lineLimit(1)
+            .fixedSize()
     }
 }
 
@@ -91,7 +140,7 @@ private struct Artwork: View {
                     .transition(.opacity)
             }
         }
-        .aspectRatio(1, contentMode: .fit)
+        .frame(width: 64, height: 64)
         .clipShape(shape)
         .overlay { shape.strokeBorder(Tokens.Colors.hairline, lineWidth: 1) }
         .motion(Motion.morph, value: image.map { ObjectIdentifier($0.cgImage) })
@@ -114,14 +163,20 @@ struct NowPlayingSettings: View {
                 LabeledContent("Spotify and Music") {
                     Button("Connect") { module.connect() }
                 }
-                Text("macOS will ask once whether Notcher may control Spotify and Music.").font(.caption)
+                Text("macOS asks once whether Notcher may control Spotify and Music.").font(.caption)
+            }
+            if let settings = module.settingsStore {
+                Toggle(isOn: settings.binding(NowPlayingModule.ambientArtwork)) {
+                    Text("Ambient artwork")
+                    Text("Artwork colour blooms through the card")
+                }
             }
         }
         .formStyle(.grouped)
     }
 
     private var checkLabel: String {
-        if module.isChecking { return "Checking..." }
+        if module.isChecking { return "Checking…" }
         guard let check = module.lastCheck else { return "Not checked" }
         return check.passed ? "Available" : "Unavailable"
     }
@@ -129,9 +184,9 @@ struct NowPlayingSettings: View {
     private var sourceLabel: String {
         switch module.phase {
         case .active(let source): source.label
-        case .idle: "Checking..."
+        case .idle: "Checking…"
         case .needsConnect: "Not connected"
-        case .notAuthorized(let app): "\(app): Automation denied"
+        case .notAuthorized(let app): "\(app): automation denied"
         case .unavailable: "Unavailable"
         }
     }

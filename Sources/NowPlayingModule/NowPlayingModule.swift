@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import NotchCore
 import Observation
@@ -54,16 +55,18 @@ public final class NowPlayingModule: NotchModule {
     /// Cached adapter self-test result. The test publishes a fake now-playing entry when nothing is playing, so it
     /// only reruns when `key` (OS build + adapter identity) changes, after the stream gives up, or on "Check again".
     public static let adapterCheck = SettingsKey<AdapterCheck?>("nowPlaying.adapterCheck", default: nil)
+    /// Let the artwork's colour bloom through the card (`GlassCard(ambient:)`).
+    public static let ambientArtwork = SettingsKey("nowPlaying.ambientArtwork", default: true)
 
     public let id = ModuleID.nowPlaying
     public let title = "Now Playing"
     public let symbol = "music.note"
-    public let placement = PanelPlacement.dashboard(.leadingTop)
+    public let placement = PanelPlacement.dashboard(.center)
     public var requirements: [PermissionRequirement] {
         ScriptablePlayer.allCases.map {
             PermissionRequirement(
                 .automation(bundleID: $0.bundleID), optional: true,
-                rationale: "Shows the \($0.name) track and its controls if the system Now Playing source is unavailable."
+                rationale: "Shows the \($0.name) track and its controls when the system Now Playing source is unavailable."
             )
         }
     }
@@ -73,6 +76,10 @@ public final class NowPlayingModule: NotchModule {
     public private(set) var liveActivity: LiveActivity?
     /// The provider feeding the card, for Settings. `nil` while none is running.
     public var activeSource: NowPlayingSource? { if case .active(let s) = phase { s } else { nil } }
+    /// Whether the card shows ambient artwork (setting; on before `start` provides the store).
+    public var ambientArtwork: Bool { settings?.get(Self.ambientArtwork) ?? Self.ambientArtwork.defaultValue }
+    /// The store from `start`, for `settingsView()`.
+    var settingsStore: SettingsStore? { settings }
     /// The self-test result in use, for Settings.
     public private(set) var lastCheck: AdapterCheck?
     public private(set) var isChecking = false
@@ -175,6 +182,13 @@ public final class NowPlayingModule: NotchModule {
         settings?.set(Self.automationConsent, true)
         guard let fallback else { return }
         activate(fallback)
+    }
+
+    /// Opens Privacy & Security › Automation, where a denied Spotify/Music permission is turned back on.
+    public func openAutomationSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     public func send(_ command: MediaCommand) {

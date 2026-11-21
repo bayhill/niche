@@ -116,7 +116,8 @@ public struct AdapterStreamParser: Sendable {
             bundleID: payload["parentApplicationBundleIdentifier"]?.string ?? bundle,
             elapsed: micros("elapsedTimeMicros") ?? payload["elapsedTime"]?.number,
             duration: micros("durationMicros") ?? payload["duration"]?.number,
-            timestamp: timestamp
+            timestamp: timestamp,
+            playbackRate: payload["playbackRate"]?.number
         )
     }
 }

@@ -14,14 +14,14 @@ struct CalendarCard: View {
                         .id(meeting.event.id)
                         .transition(.blurReplace)
                 } else {
-                    EmptyState(symbol: "calendar", title: "No more meetings today").motionAppear()
+                    EmptyState(symbol: "calendar", title: "No meetings in the next 24 hours").motionAppear()
                 }
             case .notDetermined:
-                Prompt(message: "See your next meeting here", button: "Connect Calendar", symbol: "calendar") {
+                Prompt(message: "Next meeting and a join button", button: "Connect calendar", symbol: "calendar") {
                     Task { await module.connect() }
                 }
             case .denied, .restricted, .writeOnly:
-                Prompt(message: "Calendar access is off", button: "Open System Settings", symbol: nil) {
+                Prompt(message: "Allow calendar access", button: "Open System Settings", symbol: nil) {
                     module.openPrivacySettings()
                 }
             }
@@ -43,9 +43,9 @@ private struct MeetingView: View {
                     .font(NotchTextStyle.label.font)
                     .foregroundStyle(meeting.isNow ? Tokens.Colors.accent : Tokens.Colors.textTertiary)
                     .notchHero(.calendar)
-                SectionHeader(meeting.link?.provider.label ?? "Next meeting") {
+                SectionHeader("Next meeting") {
                     if meeting.isNow {
-                        Text("now").font(NotchTextStyle.numeric.font).foregroundStyle(Tokens.Colors.accent)
+                        Text(Format.countdown(seconds: 0)).font(NotchTextStyle.numeric.font).foregroundStyle(Tokens.Colors.accent)
                     } else {
                         CountdownText(to: meeting.event.start)
                     }
@@ -93,7 +93,7 @@ struct CalendarSettings: View {
             if let settings {
                 Section("Calendars") {
                     if calendars.isEmpty {
-                        Text(module.access == .granted ? "No calendars" : "Connect Calendar to choose calendars.")
+                        Text(module.access == .granted ? "No calendars" : "Connect calendar to choose calendars")
                             .foregroundStyle(.secondary)
                     }
                     ForEach(calendars) { calendar in
@@ -109,7 +109,7 @@ struct CalendarSettings: View {
                     }
                 }
             } else {
-                Text("Calendar settings are available once the module is running.")
+                Text("Available once the module is running")
             }
         }
         .formStyle(.grouped)

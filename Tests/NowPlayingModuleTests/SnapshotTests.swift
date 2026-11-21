@@ -4,31 +4,47 @@ import NotchCoreTesting
 @testable import NowPlayingModule
 import Testing
 
-/// Writes the card in each state to $TMPDIR/notcher-snapshots for visual review.
+/// Writes the card in each state to $TMPDIR/notcher-snapshots for visual review (210 × 184, the centre slot).
 @MainActor
 @Suite struct SnapshotTests {
     static let dir = FileManager.default.temporaryDirectory.appending(path: "notcher-snapshots", directoryHint: .isDirectory)
 
-    @Test func cards() throws {
+    @Test func cards() async throws {
+        let env = try TestEnvironment(); defer { env.cleanUp() }
         var paused = SampleProvider.track
         paused.isPlaying = false
         let long = NowPlayingState(
             title: "A Very Long Track Title That Never Ends (Extended Remix)", artist: "Somebody Featuring Somebody Else",
-            isPlaying: true, bundleID: "com.apple.Safari"
+            album: "An Album Name That Is Also Far Too Long", isPlaying: true, bundleID: "com.apple.Safari"
         )
+        let plainCard = NowPlayingModule.sample()
+        await plainCard.start(env.context(for: .nowPlaying))
+        env.settings.set(NowPlayingModule.ambientArtwork, false)
+
         let connect = NowPlayingModule(adapter: nil, adapterSelfTest: { false }, fallback: FakeProvider(.appleScript))
         connect.select(adapterPassed: false)
+        let deniedFallback = FakeProvider(.appleScript)
+        let denied = NowPlayingModule(adapter: nil, adapterSelfTest: { false }, fallback: deniedFallback)
+        denied.connect()
+        deniedFallback.onFailure?(.notAuthorized(bundleID: "com.spotify.client"))
+        let unavailable = NowPlayingModule(adapter: nil, adapterSelfTest: { false }, fallback: nil)
+        unavailable.select(adapterPassed: false)
+
         let cases: [(String, NowPlayingModule)] = [
-            ("nowplaying-playing", .sample()),
-            ("nowplaying-paused", .sample(paused)),
-            ("nowplaying-long-noart", .sample(long)),
-            ("nowplaying-empty", .sample(nil)),
-            ("nowplaying-connect", connect),
+            ("np-playing-ambient", .sample()),
+            ("np-playing-plain", plainCard),
+            ("np-paused", .sample(paused)),
+            ("np-long-noart-noposition", .sample(long)),
+            ("np-empty", .sample(nil)),
+            ("np-connect", connect),
+            ("np-denied", denied),
+            ("np-unavailable", unavailable),
         ]
         for (name, module) in cases {
             let url = try ViewSnapshot.write(module: module, to: Self.dir.appending(path: "\(name).png"))
             #expect(FileManager.default.fileExists(atPath: url.path))
         }
+        #expect(denied.phase == .notAuthorized(app: "Spotify"))
         print("snapshots in \(Self.dir.path)")
     }
 }

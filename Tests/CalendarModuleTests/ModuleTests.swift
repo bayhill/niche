@@ -135,7 +135,7 @@ final class Clock {
         let module = CalendarModule.sample()
         #expect(module.meeting?.event.title == "Design review")
         #expect(module.meeting?.link?.provider == .teams)
-        #expect(module.placement == .dashboard(.leadingBottom))
+        #expect(module.placement == .dashboard(.leadingTop))
         #expect(module.requirements.map(\.kind) == [.calendar])
     }
 }
