@@ -6,7 +6,7 @@ import SwiftUI
 
 // Runs the real NotchController with fake modules covering every placement and every live-activity glyph.
 //
-//   swift run NotchPlayground [DebugOptions flags] [--glyph symbol|progress|text|countdown|image|equalizer|nowplaying|nowplaying-short|nowplaying-long]
+//   swift run NotchPlayground [DebugOptions flags] [--glyph symbol|progress|text|countdown|image|equalizer|nowplaying|nowplaying-short|nowplaying-long|files]
 //                             [--no-activity] [--quit-after <seconds>] [--hover-opens]
 
 private struct PlaygroundOptions {
@@ -112,6 +112,7 @@ private func makeModules(_ options: PlaygroundOptions) -> [FakeModule] {
 
     let soon = Date.now.addingTimeInterval(725)
     let base: [(FakeModule, LiveActivity.Priority, ActivityGlyph, ActivityGlyph?, String)] = switch options.glyph {
+    case "files": []
     case "symbol": [(claude, .attention, .symbol("sparkles", tint: .warning, pulse: true), .text("Allow?"), "Claude needs permission")]
     case "progress": [(convert, .progress, .progress(0.62), .text("3/12"), "Converting 3 of 12")]
     case "text": [(convert, .progress, .text("3/12"), .progress(0.25), "Converting 3 of 12")]
@@ -180,6 +181,20 @@ MainActor.assumeIsolated {
 
     let modules = makeModules(options)
     if let convert = modules.first(where: { $0.id == .convert }), options.glyph == nil { tickConvert(convert) }
+    // `--glyph files`: a finished conversion whose two outputs can be dragged straight out of the bar.
+    if options.glyph == "files", let convert = modules.first(where: { $0.id == .convert }) {
+        let folder = root.appending(path: "Converted", directoryHint: .isDirectory)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let files = [("hero-banner.png", 0.25), ("team.png", 0.85)].compactMap { name, hue -> URL? in
+            let image = TestImage.solid(width: 64, height: 64, red: hue, green: 0.5, blue: 1 - hue)
+            return try? TestImage.write(image, to: folder.appending(path: name))
+        }
+        convert.liveActivity = LiveActivity(
+            id: "convert.done", module: .convert, priority: .progress,
+            leading: .symbol("checkmark.circle.fill", tint: .success), trailing: .text(Format.saving(0.78), tint: .success),
+            leadingText: "2 files ready", files: files, expiresAt: .now.addingTimeInterval(6), accessibilityLabel: "Converted 2 files"
+        )
+    }
     let controller = NotchController(modules: modules, services: services, settings: settings, directories: directories, debug: debug)
     controller.start()
 

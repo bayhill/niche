@@ -77,19 +77,22 @@ extension ImageSource {
         let clock: Clock
         let gate: Gate
         let haptics: Counter
+        let disk: Disk
     }
 
     final class Counter { var count = 0 }
+    /// Which output paths "exist" for the finished activity's drag list.
+    final class Disk { var missing: Set<String> = [] }
 
     func rig() async throws -> Rig {
         let env = try TestEnvironment()
-        let runner = ScriptedRunner(), clock = Clock(), gate = Gate(), haptics = Counter()
+        let runner = ScriptedRunner(), clock = Clock(), gate = Gate(), haptics = Counter(), disk = Disk()
         let module = ConvertModule(
             runner: runner, now: { clock.now }, sleep: { _ in await gate.wait() }, thumbnailer: { _ in nil },
-            reveal: { _ in }, haptic: { haptics.count += 1 }
+            reveal: { _ in }, haptic: { haptics.count += 1 }, fileExists: { !disk.missing.contains($0.lastPathComponent) }
         )
         await module.start(env.context(for: .convert))
-        return Rig(env: env, module: module, runner: runner, clock: clock, gate: gate, haptics: haptics)
+        return Rig(env: env, module: module, runner: runner, clock: clock, gate: gate, haptics: haptics, disk: disk)
     }
 
     let png = DropItem.file(URL(fileURLWithPath: "/tmp/a.png"))
@@ -369,6 +372,96 @@ extension ImageSource {
         for job in second.jobs { second.events.yield(.succeeded(job, result(job, input: 10, output: 5))) }
         await eventually { m.batch?.isRunning == false }
         #expect(m.liveActivity?.trailing == .text("\u{2212}50%", tint: .success))
+    }
+
+    // MARK: - Files carried by the finished activity
+
+    func out(_ name: String) -> URL { URL(fileURLWithPath: "/out/\(name).webp") }
+
+    @Test func finishedActivityCarriesSuccessfulOutputsInOrder() async throws {
+        let r = try await rig(); defer { r.env.cleanUp() }
+        let m = r.module
+        m.convert(["a.png", "bad.png", "c.png", "done.webp", "e.png"].map { .file(URL(fileURLWithPath: "/tmp/\($0)")) })
+        let sub = try #require(r.runner.submissions.first)
+        let j = sub.jobs
+        // Finish out of order: the list still follows the batch.
+        sub.events.yield(.succeeded(j[4], result(j[4], input: 10, output: 5)))
+        sub.events.yield(.started(j[0]))
+        await eventually { m.batch?.succeeded == 1 }
+        #expect(m.liveActivity?.files == [])  // nothing mid-batch
+        sub.events.yield(.failed(j[1], .decodeFailed))
+        sub.events.yield(.succeeded(j[2], result(j[2], input: 10, output: 5)))
+        sub.events.yield(.failed(j[3], .alreadyWebP))
+        await eventually { m.batch?.completed == 4 }
+        #expect(m.liveActivity?.files == [])
+        sub.events.yield(.succeeded(j[0], result(j[0], input: 10, output: 5)))
+        await eventually { m.batch?.isRunning == false }
+        #expect(m.liveActivity?.files == [out("a"), out("c"), out("e")])
+        #expect(m.liveActivity?.expiresAt == r.clock.now.addingTimeInterval(4))
+    }
+
+    @Test func allFailedCarriesNoFiles() async throws {
+        let r = try await rig(); defer { r.env.cleanUp() }
+        let m = r.module
+        m.convert([.file(URL(fileURLWithPath: "/tmp/x.png")), .file(URL(fileURLWithPath: "/tmp/y.webp"))])
+        let sub = try #require(r.runner.submissions.first)
+        sub.events.yield(.failed(sub.jobs[0], .incomplete))
+        sub.events.yield(.failed(sub.jobs[1], .alreadyWebP))
+        await eventually { m.batch?.isRunning == false }
+        #expect(m.liveActivity?.trailing == .text("Failed", tint: .warning))
+        #expect(m.liveActivity?.files == [])
+    }
+
+    @Test func mergedBatchCarriesEveryOutput() async throws {
+        let r = try await rig(); defer { r.env.cleanUp() }
+        let m = r.module
+        // A finished earlier batch does not leak into the next one.
+        m.convert([.file(URL(fileURLWithPath: "/tmp/old.png"))])
+        let old = try #require(r.runner.submissions.last)
+        old.events.yield(.succeeded(old.jobs[0], result(old.jobs[0], input: 10, output: 5)))
+        await eventually { m.batch?.isRunning == false }
+        #expect(m.liveActivity?.files == [out("old")])
+
+        m.convert([.file(URL(fileURLWithPath: "/tmp/a.png"))])
+        m.convert([.file(URL(fileURLWithPath: "/tmp/b.png")), .file(URL(fileURLWithPath: "/tmp/c.png"))])
+        let first = r.runner.submissions[1], second = r.runner.submissions[2]
+        for job in second.jobs { second.events.yield(.succeeded(job, result(job, input: 10, output: 5))) }
+        await eventually { m.batch?.completed == 2 }
+        #expect(m.liveActivity?.files == [])
+        first.events.yield(.succeeded(first.jobs[0], result(first.jobs[0], input: 10, output: 5)))
+        await eventually { m.batch?.isRunning == false }
+        #expect(m.liveActivity?.files == [out("a"), out("b"), out("c")])
+    }
+
+    @Test func missingOutputIsLeftOut() async throws {
+        let r = try await rig(); defer { r.env.cleanUp() }
+        let m = r.module
+        r.disk.missing = ["b.webp"]  // e.g. deleted before the batch finished
+        m.convert(["a.png", "b.png"].map { .file(URL(fileURLWithPath: "/tmp/\($0)")) })
+        let sub = try #require(r.runner.submissions.first)
+        for job in sub.jobs { sub.events.yield(.succeeded(job, result(job, input: 10, output: 5))) }
+        await eventually { m.batch?.isRunning == false }
+        #expect(m.liveActivity?.files == [out("a")])
+    }
+
+    @Test func realOutputsAreCarried() async throws {
+        let env = try TestEnvironment(); defer { env.cleanUp() }
+        let module = ConvertModule(runner: ConversionQueue(maxConcurrent: 2), reveal: { _ in }, haptic: {})
+        await module.start(env.context(for: .convert))
+        let folder = env.root.appending(path: "Pictures", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let a = try TestImage.write(TestImage.solid(), to: folder.appending(path: "a.png"))
+        let b = try TestImage.write(TestImage.solid(green: 1), to: folder.appending(path: "b.png"))
+        module.convert([.file(a), .file(b)])
+        await eventually("done") { module.batch?.isRunning == false }
+        let files = try #require(module.liveActivity?.files)
+        #expect(files.map(\.lastPathComponent) == ["a.webp", "b.webp"])
+        #expect(files.allSatisfy { FileManager.default.fileExists(atPath: $0.path) })
+    }
+
+    @Test func samplesCarryNoRealFiles() {
+        #expect(ConvertModule.sample(.converting).liveActivity?.files == [])
+        #expect(ConvertModule.sample(.done).liveActivity == nil)
     }
 
     @Test func stopCancelsWorkAndStartWorksAgain() async throws {

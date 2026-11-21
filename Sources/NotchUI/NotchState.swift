@@ -61,6 +61,10 @@ public enum NotchEvent: Sendable, Equatable {
     case dropTargetEntered, dropTargetExited
     /// The drop was delivered to us (check `acceptsDrop(now:)` first).
     case dropped
+    /// The user started / finished dragging the activity's files out of the bar (a Notcher-originated drag).
+    case ownDragBegan
+    /// `accepted`: the drag ended with a non-empty operation (the files landed somewhere).
+    case ownDragEnded(accepted: Bool)
     case timer(NotchTimer)
 }
 
@@ -100,6 +104,9 @@ public struct NotchStateMachine: Sendable, Equatable {
     public private(set) var dropTargeted: Bool
     public private(set) var hasActivity: Bool
     public private(set) var pointerInside = false
+    /// A drag of the activity's files out of the bar is in flight: it never opens our own drop target, and leaving
+    /// the bar mid-drag does not end hover until the drag is over.
+    public private(set) var ownDragInFlight = false
     public var openOnHover: Bool
     /// Pending timers and when they are due.
     public private(set) var deadlines: [NotchTimer: NotchInstant] = [:]
@@ -118,6 +125,7 @@ public struct NotchStateMachine: Sendable, Equatable {
     public static func == (a: Self, b: Self) -> Bool {
         a.state == b.state && a.page == b.page && a.transient == b.transient && a.dropTargeted == b.dropTargeted
             && a.hasActivity == b.hasActivity && a.pointerInside == b.pointerInside && a.openOnHover == b.openOnHover
+            && a.ownDragInFlight == b.ownDragInFlight
             && a.deadlines == b.deadlines && a.resume?.page == b.resume?.page && a.resume?.transient == b.resume?.transient
             && a.lateDropUntil == b.lateDropUntil
     }
@@ -157,7 +165,7 @@ public struct NotchStateMachine: Sendable, Equatable {
             pointerInside = false
             switch state {
             case .closed, .activity: cancel(.dwell, &fx)
-            case .hover: go(restState, &fx)
+            case .hover: if !ownDragInFlight { go(restState, &fx) }
             case .expanded: if transient { cancel(.idle, &fx); schedule(.leave, at: now + Self.leaveDelay, &fx) }
             case .drop: break
             }
@@ -221,6 +229,8 @@ public struct NotchStateMachine: Sendable, Equatable {
             openOnHover = value
 
         case .dragNear:
+            // Our own outgoing drag is never a drop candidate.
+            guard !ownDragInFlight else { break }
             switch state {
             case .drop: break
             case .expanded:
@@ -243,6 +253,16 @@ public struct NotchStateMachine: Sendable, Equatable {
 
         case .dropTargetExited:
             if state == .drop { dropTargeted = false }
+
+        case .ownDragBegan:
+            // Only from the bar itself.
+            if state == .activity || state == .hover { ownDragInFlight = true }
+
+        case .ownDragEnded(let accepted):
+            guard ownDragInFlight else { break }
+            ownDragInFlight = false
+            // Files delivered, or the pointer ended up elsewhere: settle back. Never expand.
+            if state == .hover && (accepted || !pointerInside) { go(restState, &fx) }
 
         case .dropped:
             if state == .drop {

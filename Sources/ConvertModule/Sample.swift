@@ -19,7 +19,7 @@ extension ConvertModule {
         let module = ConvertModule(
             runner: SimulatedRunner(), settings: .ephemeral(), fallbackDirectory: SimulatedRunner.folder,
             thumbnailer: { url in SampleArt.thumbnail(for: url.lastPathComponent) }, reveal: { _ in }, haptic: {},
-            forwardsToShelf: false
+            forwardsToShelf: false, fileExists: { _ in false }  // sample outputs are not real files
         )
         func done(_ name: String, _ input: Int64, _ output: Int64, batch: Int) -> ConvertRow {
             let webp = "\(OutputNamer.baseName(for: name)).webp"

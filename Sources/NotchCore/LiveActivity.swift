@@ -32,6 +32,10 @@ public struct LiveActivity: Identifiable, Equatable, Sendable {
     /// Optional line of text in the right wing, between the notch and the trailing glyph (an artist).
     /// One line, secondary colour, truncated with an ellipsis.
     public var trailingText: String?
+    /// Files the user can drag straight out of the bar while this activity shows (a finished conversion's outputs).
+    /// Empty for activities with nothing to hand over. The notch layer keeps the activity on screen while the
+    /// pointer is over it or a drag is in flight, even past `expiresAt`.
+    public var files: [URL]
     /// After this instant the activity is ignored even if the module has not cleared it.
     public var expiresAt: Date?
     /// Tie-breaker between equal priorities: most recently updated wins.
@@ -40,11 +44,11 @@ public struct LiveActivity: Identifiable, Equatable, Sendable {
 
     public init(
         id: String, module: ModuleID, priority: Priority, leading: ActivityGlyph, trailing: ActivityGlyph? = nil,
-        leadingText: String? = nil, trailingText: String? = nil,
+        leadingText: String? = nil, trailingText: String? = nil, files: [URL] = [],
         expiresAt: Date? = nil, updatedAt: Date = .now, accessibilityLabel: String
     ) {
         self.id = id; self.module = module; self.priority = priority; self.leading = leading; self.trailing = trailing
-        self.leadingText = leadingText; self.trailingText = trailingText
+        self.leadingText = leadingText; self.trailingText = trailingText; self.files = files
         self.expiresAt = expiresAt; self.updatedAt = updatedAt; self.accessibilityLabel = accessibilityLabel
     }
 }

@@ -41,7 +41,7 @@ struct NotchRootView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Notcher")
-        .accessibilityHint(model.state == .expanded ? "" : HoverHint.text)
+        .accessibilityHint(model.state == .expanded ? "" : HoverHint.text(hasFiles: !(model.activity?.files.isEmpty ?? true)))
         .opacity(layout.surfaceOpacity)
         .offset(x: layout.centerOffset)
         .frame(width: layout.windowFrame.width, height: layout.windowFrame.height, alignment: .top)
@@ -131,7 +131,9 @@ private struct NotchContentView: View {
         ZStack(alignment: .top) {
             // Always mounted: its progress animates in the same transaction as the shape, so it grows, shrinks and
             // reverses with the swell spring instead of being inserted or removed.
-            HoverHintView(progress: model.hintVisible ? 1 : 0)
+            HoverHintView(
+                progress: model.hintVisible ? 1 : 0, text: HoverHint.text(hasFiles: !(model.activity?.files.isEmpty ?? true))
+            )
                 .frame(width: notch.width + PanelLayout.hoverGrowth.width, height: PanelLayout.hoverGrowth.height)
                 .padding(.top, layout.bandHeight)
                 // Centred under the hardware notch, not under a bar made lopsided by unequal wings.
@@ -219,6 +221,7 @@ private struct WingsView: View {
 /// "Click to expand Notcher" below the notch, emerging from it as it swells.
 private struct HoverHintView: View, Animatable {
     var progress: Double
+    let text: String
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     nonisolated var animatableData: Double {
@@ -227,7 +230,7 @@ private struct HoverHintView: View, Animatable {
     }
 
     var body: some View {
-        Text(HoverHint.text)
+        Text(text)
             .font(NotchTextStyle.wing.font)
             .foregroundStyle(Tokens.Colors.textSecondary)
             .lineLimit(1)

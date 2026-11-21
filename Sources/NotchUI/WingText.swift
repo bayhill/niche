@@ -114,6 +114,10 @@ public enum StatusItemClearance {
 /// The "Click to expand Notcher" line shown below the notch while it swells on hover.
 public enum HoverHint {
     public static let text = "Click to expand Notcher"
+    /// When the activity carries files that can be dragged out of the bar.
+    public static let dragText = "Drag out, or click to expand"
+
+    public static func text(hasFiles: Bool) -> String { hasFiles ? dragText : text }
     /// Scale at the start of the swell; it grows to 1 with the shape.
     public static let startScale: CGFloat = 0.82
 
@@ -123,5 +127,59 @@ public enum HoverHint {
     /// Scale for a swell progress of 0...1 (1 under Reduce Motion: fade only).
     public static func scale(progress: Double, reduceMotion: Bool) -> CGFloat {
         reduceMotion ? 1 : startScale + (1 - startScale) * CGFloat(min(1, max(0, progress)))
+    }
+}
+
+/// Telling a click on the bar from the start of a drag of the activity's files.
+public struct BarPress: Sendable, Equatable {
+    public enum Outcome: Sendable, Equatable {
+        /// Still deciding (the button is down, the pointer has not moved far enough).
+        case pending
+        case click
+        case drag
+    }
+
+    /// Movement beyond this starts a drag.
+    public static let dragThreshold: CGFloat = 4
+
+    public let start: CGPoint
+    public let hasFiles: Bool
+
+    public init(at start: CGPoint, hasFiles: Bool) { self.start = start; self.hasFiles = hasFiles }
+
+    /// Without files a press is a click at once, exactly as before; with files the decision waits.
+    public var onPress: Outcome { hasFiles ? .pending : .click }
+
+    public func onMove(to point: CGPoint) -> Outcome {
+        guard hasFiles else { return .pending }
+        let dx = point.x - start.x, dy = point.y - start.y
+        return (dx * dx + dy * dy).squareRoot() > Self.dragThreshold ? .drag : .pending
+    }
+
+    /// Released without having become a drag: a click (already sent at press time when there are no files).
+    public var onRelease: Outcome { hasFiles ? .click : .pending }
+}
+
+/// Keeps an activity with files on screen while it is in use, even past `expiresAt` or when the arbiter would now
+/// pick another one. Activities without files are selected exactly as `ActivityArbiter` says.
+public enum ActivityHold {
+    /// - Parameters:
+    ///   - pointerOnBar: the pointer is over the bar (activity or hover state).
+    ///   - releaseAt: the pointer left the bar; the hold lasts until this instant (the leave delay).
+    public static func isHolding(
+        displayed: LiveActivity?, pointerOnBar: Bool, ownDragInFlight: Bool, releaseAt: NotchInstant?, now: NotchInstant
+    ) -> Bool {
+        guard let displayed, !displayed.files.isEmpty else { return false }
+        return pointerOnBar || ownDragInFlight || releaseAt.map { now < $0 } == true
+    }
+
+    /// The held activity (its latest version if the module still publishes it), or the arbiter's choice.
+    public static func select(
+        _ candidates: [LiveActivity], now: Date, fullscreen: Bool, displayed: LiveActivity?, holding: Bool
+    ) -> LiveActivity? {
+        if holding, let displayed {
+            return candidates.first { $0.id == displayed.id && !$0.files.isEmpty } ?? displayed
+        }
+        return ActivityArbiter.select(candidates, now: now, fullscreen: fullscreen)
     }
 }

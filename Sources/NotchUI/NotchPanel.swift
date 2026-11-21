@@ -43,11 +43,14 @@ protocol NotchDropHandling: AnyObject {
     func dragExited()
     func canAcceptDrop() -> Bool
     func performDrop(_ pasteboard: NSPasteboard) -> Bool
+    /// The drag of the activity's files out of the bar ended (`operation` empty: cancelled or refused).
+    func ownDragEnded(operation: NSDragOperation)
 }
 
-/// The panel's content view: hosts SwiftUI and is the drag destination for the whole panel.
+/// The panel's content view: hosts SwiftUI, is the drag destination for the whole panel and the drag source for
+/// the activity's files.
 @MainActor
-final class NotchContainerView: NSView {
+final class NotchContainerView: NSView, NSDraggingSource {
     weak var dropHandler: NotchDropHandling?
 
     override init(frame: NSRect) {
@@ -73,6 +76,33 @@ final class NotchContainerView: NSView {
 
     override func prepareForDragOperation(_ sender: any NSDraggingInfo) -> Bool {
         dropHandler?.canAcceptDrop() ?? false
+    }
+
+    /// Starts dragging `files` out of the bar from `event` (a mouse-dragged event), one item per file in a pile.
+    func beginFileDrag(_ files: [URL], event: NSEvent) -> NSDraggingSession? {
+        guard !files.isEmpty else { return nil }
+        let origin = convert(event.locationInWindow, from: nil)
+        let side: CGFloat = 40
+        let items = files.enumerated().map { index, url -> NSDraggingItem in
+            let item = NSDraggingItem(pasteboardWriter: url as NSURL)
+            let image = (NSImage(contentsOf: url) ?? NSWorkspace.shared.icon(forFile: url.path)).copy() as? NSImage ?? NSImage()
+            image.size = NSSize(width: side, height: side)
+            let offset = CGFloat(min(index, 4)) * 3
+            item.setDraggingFrame(NSRect(x: origin.x - side / 2 + offset, y: origin.y - side / 2 - offset, width: side, height: side), contents: image)
+            return item
+        }
+        let session = beginDraggingSession(with: items, event: event, source: self)
+        session.draggingFormation = .pile
+        session.animatesToStartingPositionsOnCancelOrFail = true
+        return session
+    }
+
+    func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
+        context == .outsideApplication ? .copy : []
+    }
+
+    func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
+        dropHandler?.ownDragEnded(operation: operation)
     }
 
     override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {

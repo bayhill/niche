@@ -52,6 +52,11 @@ public final class NotchController: NotchControlling {
     private var statusTask: Task<Void, Never>?
     private var moduleSignature: [ModuleSignature] = []
     private var drag = DragTracking()
+    /// A press on a bar whose activity carries files: a click or the start of a drag, not decided yet.
+    private var press: BarPress?
+    /// The pointer left the bar; a held activity is released at this instant (the leave delay).
+    private var holdReleaseAt: NotchInstant?
+    private var holdTask: Task<Void, Never>?
 
     private struct ModuleSignature: Equatable { var id: ModuleID; var placement: PanelPlacement }
 
@@ -139,6 +144,8 @@ public final class NotchController: NotchControlling {
         expiryTask?.cancel()
         demoTask?.cancel()
         statusTask?.cancel()
+        holdTask?.cancel()
+        press = nil
         drag.poll?.cancel()
         drag = DragTracking()
         toggleKey?.unregister(); toggleKey = nil
@@ -173,6 +180,33 @@ public final class NotchController: NotchControlling {
         let effects = machine.send(event, now: clock.now)
         perform(effects)
         if before.visual != machine.visual { render(from: before) }
+        updateHold(from: before)
+    }
+
+    /// Tracks the hold on an activity with files: pointer on the bar, the leave delay after it left, or our own drag.
+    private func updateHold(from before: NotchStateMachine) {
+        if machine.pointerInside, !before.pointerInside {
+            holdReleaseAt = nil
+            holdTask?.cancel()
+        } else if !machine.pointerInside, before.pointerInside {
+            let release = clock.now + NotchStateMachine.leaveDelay
+            holdReleaseAt = release
+            holdTask?.cancel()
+            holdTask = Task { [weak self] in
+                try? await Task.sleep(until: release, clock: .continuous)
+                guard !Task.isCancelled else { return }
+                self?.refreshActivity()
+            }
+        }
+        if before.ownDragInFlight, !machine.ownDragInFlight { refreshActivity() }
+    }
+
+    private var holdingActivity: Bool {
+        ActivityHold.isHolding(
+            displayed: model.activity,
+            pointerOnBar: machine.pointerInside && (machine.state == .activity || machine.state == .hover),
+            ownDragInFlight: machine.ownDragInFlight, releaseAt: holdReleaseAt, now: clock.now
+        )
     }
 
     private func perform(_ effects: [NotchEffect]) {
@@ -238,14 +272,15 @@ public final class NotchController: NotchControlling {
             MainActor.assumeIsolated { self?.handleGlobal(type, at: location) }
         }) { monitors.append(m) }
 
-        let local: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged, .leftMouseDown, .rightMouseDown, .keyDown]
+        let local: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged, .leftMouseDown, .leftMouseUp, .rightMouseDown, .keyDown]
         if let m = NSEvent.addLocalMonitorForEvents(matching: local, handler: { [weak self] event in
             let type = event.type
             let location = NSEvent.mouseLocation
             let inPanel = event.window != nil && event.window === self?.panel
             let keyCode = type == .keyDown ? Int(event.keyCode) : nil
             let consume = MainActor.assumeIsolated {
-                self?.handleLocal(type, at: location, inPanel: inPanel, keyCode: keyCode) ?? false
+                if type == .leftMouseDragged, self?.pressBecomesDrag(at: location, event: event) == true { return true }
+                return self?.handleLocal(type, at: location, inPanel: inPanel, keyCode: keyCode) ?? false
             }
             return consume ? nil : event
         }) { monitors.append(m) }
@@ -275,11 +310,21 @@ public final class NotchController: NotchControlling {
             if type == .leftMouseDown { beginMouseDown(fromPanel: inPanel) }
             guard !pinned else { break }
             if inPanel, model.layout.hits(location) {
-                if type == .leftMouseDown { send(.click) }
+                guard type == .leftMouseDown else { break }
+                let files = (machine.state == .activity || machine.state == .hover) ? (model.activity?.files ?? []) : []
+                let press = BarPress(at: location, hasFiles: !files.isEmpty)
+                if press.onPress == .click { send(.click) } else { self.press = press }
             } else if machine.state == .expanded {
                 // A click in another window of this app (e.g. Settings).
                 send(.clickOutside)
             }
+        case .leftMouseUp:
+            // Released without moving far enough to drag: the click that expands, as on any bar.
+            if let press, press.onRelease == .click {
+                self.press = nil
+                send(.click)
+            }
+            press = nil
         case .keyDown:
             // Only when the panel itself is key (a module text field took focus): Esc is never taken from other apps.
             if keyCode == kVK_Escape, inPanel, machine.state == .expanded, !pinned {
@@ -289,6 +334,19 @@ public final class NotchController: NotchControlling {
         default: break
         }
         return false
+    }
+
+    /// Starts dragging the activity's files once a press on the bar has moved past the threshold.
+    private func pressBecomesDrag(at location: CGPoint, event: NSEvent) -> Bool {
+        guard let press, press.onMove(to: location) == .drag else { return false }
+        self.press = nil
+        guard !pinned, machine.state == .activity || machine.state == .hover,
+              let files = model.activity?.files, !files.isEmpty, let container,
+              container.beginFileDrag(files, event: event) != nil
+        else { return false }
+        Haptics.tick()
+        send(.ownDragBegan)
+        return true
     }
 
     /// Makes the panel take mouse events exactly while the pointer is inside the interactive rect, and reports
@@ -440,7 +498,9 @@ public final class NotchController: NotchControlling {
     private func refreshActivity() {
         let now = Date()
         let candidates = enabledModules.compactMap(\.liveActivity)
-        let chosen = ActivityArbiter.select(candidates, now: now, fullscreen: fullscreen)
+        let chosen = ActivityHold.select(
+            candidates, now: now, fullscreen: fullscreen, displayed: model.activity, holding: holdingActivity
+        )
         let request = chosen.map(WingText.request(for:)) ?? .none
         if chosen != model.activity || request != wingRequest {
             let textChanged = request != wingRequest
@@ -640,7 +700,7 @@ public final class NotchController: NotchControlling {
 
 extension NotchController: NotchDropHandling {
     func dragUpdated(at screenPoint: CGPoint, pasteboard: NSPasteboard) -> NSDragOperation {
-        guard machine.state == .drop else { return [] }
+        guard machine.state == .drop, !machine.ownDragInFlight else { return [] }
         let accepted = dragAcceptance(pasteboard, option: NSEvent.modifierFlags.contains(.option))
         let inside = accepted && model.layout.hits(screenPoint)
         send(inside ? .dropTargetEntered : .dropTargetExited)
@@ -650,11 +710,18 @@ extension NotchController: NotchDropHandling {
     func dragExited() { send(.dropTargetExited) }
 
     /// Also true just after a highlighted target gave up waiting, so a late drop still lands.
-    func canAcceptDrop() -> Bool { machine.acceptsDrop(now: clock.now) }
+    func canAcceptDrop() -> Bool { machine.acceptsDrop(now: clock.now) && !machine.ownDragInFlight }
 
     /// Returns false (so the source keeps its content) unless some module actually takes something.
+    func ownDragEnded(operation: NSDragOperation) {
+        refreshDragBaseline()
+        // Pointer events may not have reached us during the session: learn where the pointer ended up first.
+        updatePointer(NSEvent.mouseLocation)
+        send(.ownDragEnded(accepted: !operation.isEmpty))
+    }
+
     func performDrop(_ pasteboard: NSPasteboard) -> Bool {
-        guard machine.acceptsDrop(now: clock.now) else { return false }
+        guard machine.acceptsDrop(now: clock.now), !machine.ownDragInFlight else { return false }
         let option = NSEvent.modifierFlags.contains(.option)
         let contents = DragPasteboard.read(pasteboard)
         let modules = enabledModules

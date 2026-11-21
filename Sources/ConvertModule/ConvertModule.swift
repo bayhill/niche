@@ -116,6 +116,7 @@ public final class ConvertModule: NotchModule, ImageConverting {
     @ObservationIgnored private let reveal: @MainActor (URL) -> Void
     @ObservationIgnored private let haptic: @MainActor () -> Void
     @ObservationIgnored private let forwardsToShelf: Bool
+    @ObservationIgnored private let fileExists: @MainActor (URL) -> Bool
     @ObservationIgnored private var context: ModuleContext?
     @ObservationIgnored private var tasks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored private var expiryTask: Task<Void, Never>?
@@ -130,6 +131,7 @@ public final class ConvertModule: NotchModule, ImageConverting {
     ///   - sleep: waits before clearing the finished summary.
     ///   - thumbnailer: makes a row thumbnail from an output file.
     ///   - reveal: shows a file in Finder.
+    ///   - fileExists: whether an output is still on disk when the finished activity offers it for dragging.
     public init(
         runner: any ConversionRunning,
         settings: SettingsStore? = nil,
@@ -139,11 +141,12 @@ public final class ConvertModule: NotchModule, ImageConverting {
         thumbnailer: @escaping @Sendable (URL) async -> SendableImage? = ConvertModule.makeThumbnail,
         reveal: @escaping @MainActor (URL) -> Void = { NSWorkspace.shared.activateFileViewerSelecting([$0]) },
         haptic: @escaping @MainActor () -> Void = { Haptics.success() },
-        forwardsToShelf: Bool = true
+        forwardsToShelf: Bool = true,
+        fileExists: @escaping @MainActor (URL) -> Bool = { FileManager.default.fileExists(atPath: $0.path) }
     ) {
         self.runner = runner; self.injectedSettings = settings; self.injectedFallback = fallbackDirectory
         self.now = now; self.sleep = sleep; self.thumbnailer = thumbnailer; self.reveal = reveal; self.haptic = haptic
-        self.forwardsToShelf = forwardsToShelf
+        self.forwardsToShelf = forwardsToShelf; self.fileExists = fileExists
     }
 
     /// The app's module: a real `ConversionQueue`, settings and Downloads from the `ModuleContext`.
@@ -413,8 +416,11 @@ public final class ConvertModule: NotchModule, ImageConverting {
             trailing = .text("Failed", tint: .warning)
             label = batch.total == 1 ? "Conversion failed" : "All \(batch.total) conversions failed"
         }
+        // The outputs written in this batch (merged drops included), in batch order, that are still on disk:
+        // they can be dragged straight out of the bar while the summary shows.
+        let files = rows.filter { $0.batch == batch.id }.compactMap(\.output).filter(fileExists)
         liveActivity = LiveActivity(
-            id: Self.activityID, module: id, priority: .progress, leading: leading, trailing: trailing,
+            id: Self.activityID, module: id, priority: .progress, leading: leading, trailing: trailing, files: files,
             expiresAt: stamp.addingTimeInterval(Self.summaryDuration), updatedAt: stamp, accessibilityLabel: label
         )
         scheduleExpiry(batch: batch.id)
