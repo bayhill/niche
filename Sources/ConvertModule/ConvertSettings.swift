@@ -29,9 +29,11 @@ public enum ConvertSettings {
         return parts.joined(separator: " \u{00B7} ")
     }
 
-    /// Fits the card header: "Q80 · 2560", "Lossless".
-    public static func shortSummary(_ o: EncodeOptions) -> String {
-        var s = o.lossless ? "Lossless" : "Q\(o.quality)"
+    /// The card header's format label: "WebP" with default settings, otherwise the non-default part compactly:
+    /// "WebP 60", "Lossless", "WebP \u{00B7} 2560", "Lossless \u{00B7} 1920".
+    public static func formatLabel(_ o: EncodeOptions) -> String {
+        let defaults = EncodeOptions()
+        var s = o.lossless ? "Lossless" : (o.quality == defaults.quality ? "WebP" : "WebP \(o.quality)")
         if let edge = o.maxPixelEdge { s += " \u{00B7} \(edge)" }
         return s
     }

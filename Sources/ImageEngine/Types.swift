@@ -124,6 +124,8 @@ public struct ConversionResult: Sendable, Hashable {
 
 public enum ConversionEvent: Sendable {
     case started(ConversionJob)
+    /// Progress of one file in flight, 0...1 (decoding counts for the first 10%).
+    case fileProgress(ConversionJob, Double)
     case succeeded(ConversionJob, ConversionResult)
     case failed(ConversionJob, ConversionError)
     /// After every success or failure in this submission.

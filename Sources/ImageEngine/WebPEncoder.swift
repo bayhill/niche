@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import Synchronization
 import libwebp
 
 public enum WebPEncoder {
@@ -11,7 +12,12 @@ public enum WebPEncoder {
     /// - Parameters:
     ///   - iccProfile: embedded as an `ICCP` chunk when non-nil. Pass `sRGBProfile` (the pixels are sRGB).
     ///   - exif: raw Exif embedded as an `EXIF` chunk when non-nil.
-    public static func encode(_ image: CGImage, options: EncodeOptions, iccProfile: Data? = nil, exif: Data? = nil) throws(ConversionError) -> Data {
+    ///   - progress: called with 0...1 as libwebp reports progress, in steps of at least 5%, possibly from an
+    ///     encoder thread.
+    public static func encode(
+        _ image: CGImage, options: EncodeOptions, iccProfile: Data? = nil, exif: Data? = nil,
+        progress: (@Sendable (Double) -> Void)? = nil
+    ) throws(ConversionError) -> Data {
         let width = image.width, height = image.height
         guard width > 0, height > 0, width <= ImageDecoder.webPMaxEdge, height <= ImageDecoder.webPMaxEdge else {
             throw .encodeFailed(code: Int(VP8_ENC_ERROR_BAD_DIMENSION.rawValue))
@@ -52,11 +58,25 @@ public enum WebPEncoder {
         WebPMemoryWriterInit(&writer)
         defer { WebPMemoryWriterClear(&writer) }
         picture.writer = WebPMemoryWrite
-        let ok = withUnsafeMutablePointer(to: &writer) { w -> Int32 in
-            picture.custom_ptr = UnsafeMutableRawPointer(w)
-            defer { picture.custom_ptr = nil }
-            return WebPEncode(&config, &picture)
+        let reporter = progress.map(ProgressReporter.init)
+        if let reporter {
+            picture.user_data = Unmanaged.passUnretained(reporter).toOpaque()
+            picture.progress_hook = { percent, picture in
+                if let raw = picture?.pointee.user_data {
+                    Unmanaged<ProgressReporter>.fromOpaque(raw).takeUnretainedValue().report(percent)
+                }
+                return 1
+            }
         }
+        let ok = withExtendedLifetime(reporter) {
+            withUnsafeMutablePointer(to: &writer) { w -> Int32 in
+                picture.custom_ptr = UnsafeMutableRawPointer(w)
+                defer { picture.custom_ptr = nil }
+                return WebPEncode(&config, &picture)
+            }
+        }
+        picture.progress_hook = nil
+        picture.user_data = nil
         guard ok != 0, let mem = writer.mem, writer.size > 0 else { throw .encodeFailed(code: Int(picture.error_code.rawValue)) }
         let bitstream = Data(bytes: mem, count: writer.size)
 
@@ -92,6 +112,23 @@ public enum WebPEncoder {
         try check(WebPMuxAssemble(mux, &assembled))
         guard let bytes = assembled.bytes else { throw .encodeFailed(code: Int(VP8_ENC_ERROR_BAD_WRITE.rawValue)) }
         return Data(bytes: bytes, count: assembled.size)
+    }
+}
+
+/// Forwards libwebp's integer percentages, throttled. libwebp may call it from its alpha worker thread.
+final class ProgressReporter: Sendable {
+    private let sink: @Sendable (Double) -> Void
+    private let last = Mutex<Int32>(-100)
+
+    init(_ sink: @escaping @Sendable (Double) -> Void) { self.sink = sink }
+
+    func report(_ percent: Int32) {
+        let send = last.withLock { last -> Bool in
+            guard percent >= last + 5 || (percent >= 100 && last < 100) else { return false }
+            last = percent
+            return true
+        }
+        if send { sink(Double(min(100, max(0, percent))) / 100) }
     }
 }
 

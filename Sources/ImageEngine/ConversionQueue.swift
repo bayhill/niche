@@ -51,7 +51,8 @@ public actor ConversionQueue {
         events.yield(.started(job))
 
         let encoded: Encoded
-        do { encoded = try await Self.encode(job.source, options: options) } catch {
+        let report: @Sendable (Double) -> Void = { events.yield(.fileProgress(job, $0)) }
+        do { encoded = try await Self.encode(job.source, options: options, progress: report) } catch {
             events.yield(.failed(job, error)); return
         }
 
@@ -136,12 +137,12 @@ public actor ConversionQueue {
     }
 
     @concurrent
-    static func encode(_ source: ImageSource, options: EncodeOptions) async throws(ConversionError) -> Encoded {
-        try convert(source, options: options)
+    static func encode(_ source: ImageSource, options: EncodeOptions, progress: (@Sendable (Double) -> Void)?) async throws(ConversionError) -> Encoded {
+        try convert(source, options: options, progress: progress)
     }
 
     /// The whole decode → encode pipeline for one source, synchronously.
-    static func convert(_ source: ImageSource, options: EncodeOptions) throws(ConversionError) -> Encoded {
+    static func convert(_ source: ImageSource, options: EncodeOptions, progress: (@Sendable (Double) -> Void)? = nil) throws(ConversionError) -> Encoded {
         let inputBytes: Int64
         switch source {
         case .file(let url):
@@ -153,9 +154,14 @@ public actor ConversionQueue {
         }
         let keep = !options.stripMetadata
         let decoded = try ImageDecoder.load(source, maxPixelEdge: options.maxPixelEdge, includeMetadata: keep)
+        progress?(0.1)
+        var scaled: (@Sendable (Double) -> Void)?
+        if let progress { scaled = { progress(0.1 + 0.9 * $0) } }
         let data = try WebPEncoder.encode(
-            decoded.image, options: options, iccProfile: keep ? WebPEncoder.sRGBProfile : nil, exif: keep ? decoded.exif : nil
+            decoded.image, options: options, iccProfile: keep ? WebPEncoder.sRGBProfile : nil, exif: keep ? decoded.exif : nil,
+            progress: scaled
         )
+        progress?(1)  // libwebp's last report can stop short of 100
         return Encoded(data: data, inputBytes: inputBytes, pixelSize: decoded.pixelSize, originalPixelSize: decoded.originalPixelSize, notes: decoded.notes)
     }
 

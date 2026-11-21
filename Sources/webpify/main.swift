@@ -67,7 +67,7 @@ for await event in queue.submit(jobs, options: options) {
     case .failed(let job, let error):
         failures += 1
         print("\(job.source.displayName): \(error)")
-    case .started, .progress:
+    case .started, .fileProgress, .progress:
         break
     }
 }

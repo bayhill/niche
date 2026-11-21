@@ -13,42 +13,74 @@ public protocol ConversionRunning: Sendable {
 
 extension ConversionQueue: ConversionRunning {}
 
-/// One line in the card's recent list.
-public struct ConvertedItem: Identifiable, Equatable, Sendable {
+/// One file on the card, from the moment it is queued until it scrolls out of the history.
+public struct ConvertRow: Identifiable, Equatable, Sendable {
+    public enum State: Equatable, Sendable {
+        case waiting
+        /// `nil` until the engine reports progress.
+        case converting(Double?)
+        case done(output: URL, inputBytes: Int64, outputBytes: Int64)
+        /// A short reason.
+        case failed(String)
+    }
+
+    /// The conversion job's id.
     public let id: UUID
-    /// Output file name on success; source name on failure.
+    /// Rows from one batch share this; a batch that grows while running keeps it.
+    public let batch: Int
+    /// The source file name (or the suggested name of dropped image data).
     public var name: String
-    public var output: URL?
-    public var inputBytes: Int64
-    public var outputBytes: Int64
-    public var failure: String?
-    public var notes: [String]
+    public var state: State
+    public var notes: [String] = []
     public var thumbnail: SendableImage?
 
-    public var savedFraction: Double { inputBytes > 0 ? 1 - Double(outputBytes) / Double(inputBytes) : 0 }
-    /// "1.2 MB → 264 KB" or the failure reason.
-    public var detail: String { failure ?? "\(Format.bytes(inputBytes)) \u{2192} \(Format.bytes(outputBytes))" }
-
-    public init(id: UUID = UUID(), name: String, output: URL?, inputBytes: Int64, outputBytes: Int64,
-                failure: String? = nil, notes: [String] = [], thumbnail: SendableImage? = nil) {
-        self.id = id; self.name = name; self.output = output; self.inputBytes = inputBytes; self.outputBytes = outputBytes
-        self.failure = failure; self.notes = notes; self.thumbnail = thumbnail
+    public init(id: UUID = UUID(), batch: Int, name: String, state: State, notes: [String] = [], thumbnail: SendableImage? = nil) {
+        self.id = id; self.batch = batch; self.name = name; self.state = state; self.notes = notes; self.thumbnail = thumbnail
     }
+
+    public var output: URL? { if case .done(let url, _, _) = state { url } else { nil } }
+    public var isActive: Bool {
+        switch state {
+        case .waiting, .converting: true
+        case .done, .failed: false
+        }
+    }
+    /// `1 - output/input` for a finished row.
+    public var savedFraction: Double? {
+        guard case .done(_, let input, let output) = state, input > 0 else { return nil }
+        return 1 - Double(output) / Double(input)
+    }
+
+    /// The row's second line.
+    public var detail: String {
+        switch state {
+        case .waiting: "Waiting"
+        case .converting: "Converting\u{2026}"
+        case .done(_, let input, let output): "\(Format.bytes(input)) \u{2192} \(Format.bytes(output))"
+        case .failed(let reason): reason
+        }
+    }
+
+    /// The trailing figure: the saving for a finished row.
+    public var figure: String? { savedFraction.map(Format.saving) }
+
+    /// A saving is `success`; no change or growth is information, so `secondary`.
+    public var figureTint: TintRole { (savedFraction ?? 0) >= 0.005 ? .success : .secondary }
 }
 
 /// Counters for the batch in flight (or the one whose summary is still showing).
 public struct BatchProgress: Equatable, Sendable {
+    public var id: Int
     public var total = 0
     public var succeeded = 0
     public var failed = 0
     public var inputBytes: Int64 = 0
     public var outputBytes: Int64 = 0
 
-    public init(total: Int = 0) { self.total = total }
+    public init(id: Int, total: Int = 0) { self.id = id; self.total = total }
 
     public var completed: Int { succeeded + failed }
     public var isRunning: Bool { completed < total }
-    public var fraction: Double { total > 0 ? Double(completed) / Double(total) : 0 }
     /// Over the successful files; `nil` when nothing succeeded.
     public var savedFraction: Double? { inputBytes > 0 && succeeded > 0 ? 1 - Double(outputBytes) / Double(inputBytes) : nil }
 }
@@ -59,17 +91,18 @@ public struct BatchProgress: Equatable, Sendable {
 public final class ConvertModule: NotchModule, ImageConverting {
     public let id: ModuleID = .convert
     public let title = "Convert"
-    public let symbol = "photo.badge.arrow.down"
-    public let placement: PanelPlacement = .dashboard(.center)
+    public let symbol = "photo"
+    public let placement: PanelPlacement = .dashboard(.trailing)
 
     public private(set) var liveActivity: LiveActivity?
-    /// Newest first, at most `recentLimit`.
-    public private(set) var recent: [ConvertedItem] = []
+    /// Newest batch first, files in drop order within a batch. Older batches keep at most `visibleLimit` rows.
+    public private(set) var rows: [ConvertRow] = []
     public private(set) var batch: BatchProgress?
     /// The card is showing its inline options.
     public var showingOptions = false
 
-    public static let recentLimit = 3
+    /// Rows that fit the card.
+    public static let visibleLimit = 3
     /// How long the finished summary stays beside the notch.
     public static let summaryDuration: TimeInterval = 4
     static let activityID = "convert.batch"
@@ -86,7 +119,7 @@ public final class ConvertModule: NotchModule, ImageConverting {
     @ObservationIgnored private var context: ModuleContext?
     @ObservationIgnored private var tasks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored private var expiryTask: Task<Void, Never>?
-    @ObservationIgnored private var batchGeneration = 0
+    @ObservationIgnored private var nextBatchID = 0
     @ObservationIgnored private lazy var detachedSettings = SettingsStore.ephemeral()
 
     /// - Parameters:
@@ -138,6 +171,45 @@ public final class ConvertModule: NotchModule, ImageConverting {
         settings.set(ConvertSettings.maxPixelEdge, choices[(i + 1) % choices.count])
     }
 
+    // MARK: - Card state
+
+    /// What the header shows on the right: "2/5" while working, otherwise the format label ("WebP", "WebP 60").
+    public var headerTrailing: String {
+        if let batch, batch.isRunning { return "\(batch.completed)/\(batch.total)" }
+        return ConvertSettings.formatLabel(options)
+    }
+
+    /// The rows that fit the card. While working, the window follows the work: the last finished file, then
+    /// the files converting, then those waiting. At rest it shows the end of the newest batch.
+    public var visibleRows: [ConvertRow] {
+        let limit = Self.visibleLimit
+        guard rows.count > limit else { return rows }
+        var start: Int
+        if let firstActive = rows.firstIndex(where: \.isActive) {
+            start = max(0, firstActive - 1)
+        } else {
+            let newest = rows[0].batch
+            let end = rows.firstIndex { $0.batch != newest } ?? rows.count
+            start = max(0, end - limit)
+        }
+        start = min(start, rows.count - limit)
+        return Array(rows[start..<start + limit])
+    }
+
+    /// The row whose ring the wing's progress ring flies into.
+    public var heroRowID: UUID? {
+        rows.first { if case .converting = $0.state { true } else { false } }?.id
+    }
+
+    /// Batch progress including the files part-way through.
+    var batchFraction: Double {
+        guard let batch, batch.total > 0 else { return 0 }
+        let partial = rows.lazy.filter { $0.batch == batch.id }.reduce(0.0) { sum, row in
+            if case .converting(let p?) = row.state { sum + p } else { sum }
+        }
+        return min(1, (Double(batch.completed) + partial) / Double(batch.total))
+    }
+
     // MARK: - NotchModule
 
     public func start(_ context: ModuleContext) async {
@@ -151,7 +223,11 @@ public final class ConvertModule: NotchModule, ImageConverting {
         tasks.removeAll()
         expiryTask?.cancel()
         expiryTask = nil
-        if batch?.isRunning == true { batch = nil; liveActivity = nil }
+        if batch?.isRunning == true {
+            rows.removeAll(where: \.isActive)
+            batch = nil
+            liveActivity = nil
+        }
         context = nil
     }
 
@@ -171,8 +247,11 @@ public final class ConvertModule: NotchModule, ImageConverting {
         }
     }
 
+    /// "Convert to WebP" / "3 images · ⌥ to shelve".
     public func dropHint(for items: [DropItem]) -> DropHint? {
-        DropHint(title: "Drop to convert to WebP", subtitle: ConvertSettings.summary(options), symbol: symbol)
+        let count = max(1, items.count)
+        let noun = count == 1 ? "image" : "images"
+        return DropHint(title: "Convert to WebP", subtitle: "\(count) \(noun) \u{00B7} \u{2325} to shelve", symbol: symbol)
     }
 
     public func handleDrop(_ payload: DropPayload) async {
@@ -198,7 +277,7 @@ public final class ConvertModule: NotchModule, ImageConverting {
             case .imageData(let data, let name): ConversionJob(source: .data(data, name: name), fallbackDirectory: fallback)
             }
         }
-        beginBatch(adding: jobs.count)
+        enqueue(jobs)
         let stream = runner.submit(jobs, options: options)
         let token = UUID()
         tasks[token] = Task { [weak self] in
@@ -212,19 +291,36 @@ public final class ConvertModule: NotchModule, ImageConverting {
 
     // MARK: - Events
 
-    private func beginBatch(adding count: Int) {
+    private func enqueue(_ jobs: [ConversionJob]) {
         expiryTask?.cancel()
         expiryTask = nil
         Motion.animate(Motion.morph) {
+            let batchID: Int
+            let insertAt: Int
             if var current = batch, current.isRunning {
-                current.total += count
+                // Files dropped while working join the batch, after its files.
+                current.total += jobs.count
                 batch = current
+                batchID = current.id
+                insertAt = rows.firstIndex { $0.batch != batchID } ?? rows.count
             } else {
-                batchGeneration += 1
-                batch = BatchProgress(total: count)
+                nextBatchID += 1
+                batchID = nextBatchID
+                batch = BatchProgress(id: batchID, total: jobs.count)
+                insertAt = 0
             }
+            let fresh = jobs.map { ConvertRow(id: $0.id, batch: batchID, name: $0.source.displayName, state: .waiting) }
+            rows.insert(contentsOf: fresh, at: insertAt)
+            trimHistory(keeping: batchID)
         }
         updateActivity()
+    }
+
+    /// Keeps every row of the current batch and at most `visibleLimit` older ones.
+    private func trimHistory(keeping batchID: Int) {
+        let current = rows.filter { $0.batch == batchID }
+        let older = rows.filter { $0.batch != batchID }.prefix(Self.visibleLimit)
+        rows = current + older
     }
 
     func handle(_ event: ConversionEvent) {
@@ -233,41 +329,53 @@ public final class ConvertModule: NotchModule, ImageConverting {
             if wasRunning, let batch, !batch.isRunning, batch.succeeded > 0 { haptic() }
         }
         switch event {
-        case .started, .progress:
+        case .progress:
             return
-        case .succeeded(_, let result):
-            let item = ConvertedItem(
-                name: result.output.lastPathComponent, output: result.output,
-                inputBytes: result.inputBytes, outputBytes: result.outputBytes, notes: result.notes
-            )
+        case .started(let job):
+            update(job.id, animation: Motion.morph) { $0.state = .converting(nil) }
+        case .fileProgress(let job, let fraction):
+            update(job.id, animation: Motion.morph) { row in
+                if case .converting = row.state { row.state = .converting(fraction) }
+            }
+        case .succeeded(let job, let result):
             Motion.animate(Motion.morph) {
-                batch?.succeeded += 1
-                batch?.inputBytes += result.inputBytes
-                batch?.outputBytes += result.outputBytes
-                push(item)
+                if batch?.id == rowBatch(job.id) {
+                    batch?.succeeded += 1
+                    batch?.inputBytes += result.inputBytes
+                    batch?.outputBytes += result.outputBytes
+                }
+                modify(job.id) { row in
+                    row.state = .done(output: result.output, inputBytes: result.inputBytes, outputBytes: result.outputBytes)
+                    row.notes = result.notes
+                }
             }
             if forwardsToShelf { context?.services.shelf?.add([result.output], origin: .converted) }
-            loadThumbnail(for: item.id, from: result.output)
+            loadThumbnail(for: job.id, from: result.output)
         case .failed(let job, let error):
-            let item = ConvertedItem(name: job.source.displayName, output: nil, inputBytes: 0, outputBytes: 0, failure: error.message)
             Motion.animate(Motion.morph) {
-                batch?.failed += 1
-                push(item)
+                if batch?.id == rowBatch(job.id) { batch?.failed += 1 }
+                modify(job.id) { $0.state = .failed(error.message) }
             }
         }
         updateActivity()
     }
 
-    private func push(_ item: ConvertedItem) {
-        recent.insert(item, at: 0)
-        if recent.count > Self.recentLimit { recent.removeLast(recent.count - Self.recentLimit) }
+    private func rowBatch(_ id: UUID) -> Int? { rows.first { $0.id == id }?.batch }
+
+    private func modify(_ id: UUID, _ change: (inout ConvertRow) -> Void) {
+        guard let i = rows.firstIndex(where: { $0.id == id }) else { return }
+        change(&rows[i])
+    }
+
+    private func update(_ id: UUID, animation: Animation, _ change: (inout ConvertRow) -> Void) {
+        Motion.animate(animation) { modify(id, change) }
     }
 
     private func loadThumbnail(for id: UUID, from url: URL) {
         let thumbnailer = self.thumbnailer
         Task { [weak self] in
-            guard let image = await thumbnailer(url), let self, let i = self.recent.firstIndex(where: { $0.id == id }) else { return }
-            Motion.animate(Motion.quick) { self.recent[i].thumbnail = image }
+            guard let image = await thumbnailer(url), let self else { return }
+            self.update(id, animation: Motion.quick) { $0.thumbnail = image }
         }
     }
 
@@ -277,43 +385,41 @@ public final class ConvertModule: NotchModule, ImageConverting {
         if batch.isRunning {
             liveActivity = LiveActivity(
                 id: Self.activityID, module: id, priority: .progress,
-                leading: .progress(batch.fraction), trailing: .text("\(batch.completed)/\(batch.total)"),
+                leading: .progress(batchFraction), trailing: .text("\(batch.completed)/\(batch.total)"),
                 updatedAt: stamp, accessibilityLabel: "Converting images to WebP, \(batch.completed) of \(batch.total) done"
             )
             return
         }
+        guard liveActivity?.expiresAt == nil else { return }  // summary already showing
 
         let leading: ActivityGlyph
-        let trailing: ActivityGlyph?
+        let trailing: ActivityGlyph
         var label: String
         if let saved = batch.savedFraction {
-            let grew = saved < 0
-            let tint: TintRole = batch.failed > 0 || grew ? .warning : .success
-            let symbol = batch.failed > 0 ? "exclamationmark.triangle.fill" : "checkmark.circle.fill"
-            leading = .symbol(symbol, tint: tint)
+            // A saving is success; growth is information (secondary); failures need a look (warning).
+            let tint: TintRole = batch.failed > 0 ? .warning : (saved >= 0.005 ? .success : .secondary)
+            leading = .symbol(batch.failed > 0 ? "exclamationmark.triangle.fill" : "checkmark.circle.fill", tint: tint)
             trailing = .text(Format.saving(saved))
-            label = "Converted \(batch.succeeded) of \(batch.total) images, " + (grew ? "\(Format.saving(saved)) larger" : "\(Format.saving(saved)) smaller")
+            label = "Converted \(batch.succeeded) of \(batch.total) images to WebP, size \(Format.saving(saved))"
             if batch.failed > 0 { label += ", \(batch.failed) failed" }
         } else {
             leading = .symbol("exclamationmark.triangle.fill", tint: .warning)
             trailing = .text("Failed")
             label = batch.total == 1 ? "Conversion failed" : "All \(batch.total) conversions failed"
         }
-        let expires = stamp.addingTimeInterval(Self.summaryDuration)
         liveActivity = LiveActivity(
             id: Self.activityID, module: id, priority: .progress, leading: leading, trailing: trailing,
-            expiresAt: expires, updatedAt: stamp, accessibilityLabel: label
+            expiresAt: stamp.addingTimeInterval(Self.summaryDuration), updatedAt: stamp, accessibilityLabel: label
         )
-        scheduleExpiry()
+        scheduleExpiry(batch: batch.id)
     }
 
-    private func scheduleExpiry() {
+    private func scheduleExpiry(batch batchID: Int) {
         expiryTask?.cancel()
-        let generation = batchGeneration
         let sleep = self.sleep
         expiryTask = Task { [weak self] in
             await sleep(.seconds(Self.summaryDuration))
-            guard !Task.isCancelled, let self, self.batchGeneration == generation, self.batch?.isRunning == false else { return }
+            guard !Task.isCancelled, let self, self.batch?.id == batchID, self.batch?.isRunning == false else { return }
             Motion.animate(Motion.morph) {
                 self.batch = nil
                 self.liveActivity = nil
@@ -323,8 +429,8 @@ public final class ConvertModule: NotchModule, ImageConverting {
 
     // MARK: - Card actions
 
-    func open(_ item: ConvertedItem) {
-        guard let url = item.output else { return }
+    func open(_ row: ConvertRow) {
+        guard let url = row.output else { return }
         reveal(url)
     }
 
@@ -336,10 +442,11 @@ public final class ConvertModule: NotchModule, ImageConverting {
     // MARK: - Sample state
 
     /// Replaces the visible state; used by `sample()`.
-    func load(recent: [ConvertedItem], batch: BatchProgress?) {
-        self.recent = recent
+    func load(rows: [ConvertRow], batch: BatchProgress?) {
+        self.rows = rows
         self.batch = batch
-        batchGeneration += 1
+        nextBatchID = max(nextBatchID, (rows.map(\.batch) + [batch?.id ?? 0]).max() ?? 0)
+        liveActivity = nil
         updateActivity()
     }
 }

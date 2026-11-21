@@ -4,33 +4,54 @@ import ImageEngine
 import NotchCore
 
 extension ConvertModule {
+    /// The states `sample(_:)` can show, matching the design's previews.
+    public enum SampleState: Sendable, CaseIterable {
+        /// Nothing converted yet.
+        case empty
+        /// Two of five done, one converting, the rest waiting.
+        case converting
+        /// Three finished files, one of which grew.
+        case done
+    }
+
     /// Built-in sample data for `--fixtures`, the playground and screenshots. Touches no files: drops are simulated.
-    /// - Parameter inFlight: also show a batch in progress (3 of 12).
-    public static func sample(inFlight: Bool = true) -> ConvertModule {
+    public static func sample(_ state: SampleState = .converting) -> ConvertModule {
         let module = ConvertModule(
             runner: SimulatedRunner(), settings: .ephemeral(), fallbackDirectory: SimulatedRunner.folder,
             thumbnailer: { url in SampleArt.thumbnail(for: url.lastPathComponent) }, reveal: { _ in }, haptic: {},
             forwardsToShelf: false
         )
-        module.settings.set(ConvertSettings.maxPixelEdge, 2560)
-        let items = [
-            ("hero-banner.webp", 1_240_000, 264_000),
-            ("team-offsite.webp", 3_860_000, 512_000),
-            ("pricing-chart.webp", 182_000, 41_000),
-        ].map { name, input, output in
-            ConvertedItem(
-                name: name, output: SimulatedRunner.folder.appending(path: name), inputBytes: Int64(input), outputBytes: Int64(output),
-                thumbnail: SampleArt.thumbnail(for: name)
+        func done(_ name: String, _ input: Int64, _ output: Int64, batch: Int) -> ConvertRow {
+            let webp = "\(OutputNamer.baseName(for: name)).webp"
+            return ConvertRow(
+                batch: batch, name: name,
+                state: .done(output: SimulatedRunner.folder.appending(path: webp), inputBytes: input, outputBytes: output),
+                thumbnail: SampleArt.thumbnail(for: webp)
             )
         }
-        var batch: BatchProgress?
-        if inFlight {
-            batch = BatchProgress(total: 12)
-            batch?.succeeded = 3
-            batch?.inputBytes = 5_282_000
-            batch?.outputBytes = 817_000
+        switch state {
+        case .empty:
+            break
+        case .converting:
+            let rows = [
+                done("harbor-dusk.png", 2_100_000, 380_000, batch: 1),
+                done("hero-banner.png", 1_200_000, 264_000, batch: 1),
+                ConvertRow(batch: 1, name: "dunes-wide.jpeg", state: .converting(0.62)),
+                ConvertRow(batch: 1, name: "fjord-morning.heic", state: .waiting),
+                ConvertRow(batch: 1, name: "team-offsite.jpg", state: .waiting),
+            ]
+            var batch = BatchProgress(id: 1, total: 5)
+            batch.succeeded = 2
+            batch.inputBytes = 3_300_000
+            batch.outputBytes = 644_000
+            module.load(rows: rows, batch: batch)
+        case .done:
+            module.load(rows: [
+                done("hero-banner.png", 1_200_000, 264_000, batch: 1),
+                done("dunes-wide.jpeg", 3_400_000, 912_000, batch: 1),
+                done("settings-panel.png", 86_000, 91_000, batch: 1),
+            ], batch: nil)
         }
-        module.load(recent: items, batch: batch)
         return module
     }
 }
@@ -44,7 +65,10 @@ struct SimulatedRunner: ConversionRunning {
             let task = Task {
                 for (i, job) in jobs.enumerated() {
                     continuation.yield(.started(job))
-                    try? await Task.sleep(for: .milliseconds(450))
+                    for step in 1...5 {
+                        try? await Task.sleep(for: .milliseconds(120))
+                        continuation.yield(.fileProgress(job, Double(step) / 5))
+                    }
                     if Task.isCancelled { break }
                     let name = job.source.displayName
                     let seed = name.unicodeScalars.reduce(0) { $0 &+ Int($1.value) }

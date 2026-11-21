@@ -92,8 +92,10 @@ extension ImageSource {
     @Test func basics() async throws {
         let r = try await rig(); defer { r.env.cleanUp() }
         #expect(r.module.id == .convert)
-        #expect(r.module.placement == .dashboard(.center))
+        #expect(r.module.title == "Convert")
+        #expect(r.module.placement == .dashboard(.trailing))
         #expect(r.module.liveActivity == nil)
+        #expect(r.module.rows.isEmpty)
         #expect(r.module.settingsView() != nil)
         await r.module.start(r.env.context(for: .convert))  // idempotent
     }
@@ -119,18 +121,43 @@ extension ImageSource {
         #expect(routes.first?.payload.items == [png])
     }
 
-    @Test func hintFollowsSettings() async throws {
+    @Test func hintNamesTheActionCountAndOptionKey() async throws {
         let r = try await rig(); defer { r.env.cleanUp() }
         let m = r.module
-        #expect(m.dropHint(for: [png]) == DropHint(title: "Drop to convert to WebP", subtitle: "Quality 80", symbol: m.symbol))
-        m.cycleMaxEdge(); m.cycleMaxEdge()
-        #expect(m.dropHint(for: [png])?.subtitle == "Quality 80 \u{00B7} max 2560 px")
-        m.stepQuality(by: 2)
-        #expect(m.dropHint(for: [png])?.subtitle == "Quality 90 \u{00B7} max 2560 px")
+        #expect(m.dropHint(for: [png]) == DropHint(title: "Convert to WebP", subtitle: "1 image \u{00B7} \u{2325} to shelve", symbol: "photo"))
+        #expect(m.dropHint(for: [png, png, png])?.subtitle == "3 images \u{00B7} \u{2325} to shelve")
         m.toggleLossless()
-        #expect(m.dropHint(for: [png])?.subtitle == "Lossless \u{00B7} max 2560 px")
-        m.toggleStripMetadata()
-        #expect(m.dropHint(for: [png])?.subtitle == "Lossless \u{00B7} max 2560 px \u{00B7} keep metadata")
+        #expect(m.dropHint(for: [png])?.title == "Convert to WebP")  // settings are not repeated
+        // Through the router, the count is what Convert would receive.
+        let routed = DropRouter.hint(for: DropPayload(items: [png, .text("x"), png]), among: [m])
+        #expect(routed?.subtitle == "2 images \u{00B7} \u{2325} to shelve")
+    }
+
+    @Test func headerShowsFormatAtRestAndCountWhileWorking() async throws {
+        let r = try await rig(); defer { r.env.cleanUp() }
+        let m = r.module
+        #expect(m.headerTrailing == "WebP")
+        m.setQuality(60)
+        #expect(m.headerTrailing == "WebP 60")
+        m.cycleMaxEdge(); m.cycleMaxEdge()
+        #expect(m.headerTrailing == "WebP 60 \u{00B7} 2560")
+        m.toggleLossless()
+        #expect(m.headerTrailing == "Lossless \u{00B7} 2560")
+        m.cycleMaxEdge(); m.cycleMaxEdge()
+        #expect(m.headerTrailing == "Lossless")
+        m.toggleLossless(); m.setQuality(80); m.toggleStripMetadata()
+        #expect(m.headerTrailing == "WebP")  // metadata is not shown on the card
+
+        m.convert((1...5).map { .file(URL(fileURLWithPath: "/tmp/\($0).png")) })
+        #expect(m.headerTrailing == "0/5")
+        let sub = try #require(r.runner.submissions.first)
+        sub.events.yield(.succeeded(sub.jobs[0], result(sub.jobs[0], input: 10, output: 5)))
+        sub.events.yield(.failed(sub.jobs[1], .decodeFailed))
+        await eventually { m.batch?.completed == 2 }
+        #expect(m.headerTrailing == "2/5")
+        for job in sub.jobs.dropFirst(2) { sub.events.yield(.succeeded(job, result(job, input: 10, output: 5))) }
+        await eventually { m.batch?.isRunning == false }
+        #expect(m.headerTrailing == "WebP")
     }
 
     @Test func settingsPersistUnderConvertKeys() async throws {
@@ -165,6 +192,7 @@ extension ImageSource {
         #expect(sub.options.quality == 60)
         #expect(sub.jobs.map(\.source) == [.file(URL(fileURLWithPath: "/tmp/a.png")), .data(Data([1]), name: "clip")])
         #expect(sub.jobs.allSatisfy { $0.fallbackDirectory == r.env.directories.downloads })
+        #expect(r.module.rows.map(\.id) == sub.jobs.map(\.id))
     }
 
     @Test func handleDropEnqueuesOnlyAcceptedItemsAndReturns() async throws {
@@ -173,6 +201,84 @@ extension ImageSource {
         let sub = try #require(r.runner.submissions.first)
         #expect(sub.jobs.map(\.source) == [.file(URL(fileURLWithPath: "/tmp/a.png")), .data(Data([9]), name: "Image")])
         #expect(r.module.batch?.isRunning == true)
+        #expect(r.module.rows.map(\.name) == ["a.png", "Image"])
+    }
+
+    @Test func rowsGoFromWaitingToConvertingToDoneOrFailed() async throws {
+        let r = try await rig(); defer { r.env.cleanUp() }
+        let m = r.module
+        m.convert(["hero.png", "broken.jpg"].map { .file(URL(fileURLWithPath: "/tmp/\($0)")) })
+        let sub = try #require(r.runner.submissions.first)
+        let (hero, broken) = (sub.jobs[0], sub.jobs[1])
+        func row(_ job: ConversionJob) -> ConvertRow? { m.rows.first { $0.id == job.id } }
+
+        #expect(m.rows.map(\.state) == [.waiting, .waiting])
+        #expect(row(hero)?.detail == "Waiting")
+        #expect(m.heroRowID == nil)
+
+        sub.events.yield(.started(hero))
+        await eventually { row(hero)?.state == .converting(nil) }
+        #expect(row(hero)?.detail == "Converting\u{2026}")
+        #expect(m.heroRowID == hero.id)
+        #expect(row(broken)?.state == .waiting)
+
+        sub.events.yield(.fileProgress(hero, 0.4))
+        await eventually { row(hero)?.state == .converting(0.4) }
+        #expect(m.liveActivity?.leading == .progress(0.2))  // 0.4 of one file out of two
+
+        sub.events.yield(.succeeded(hero, result(hero, input: 1_200_000, output: 264_000)))
+        await eventually { row(hero)?.output != nil }
+        #expect(row(hero)?.state == .done(output: URL(fileURLWithPath: "/out/hero.webp"), inputBytes: 1_200_000, outputBytes: 264_000))
+        #expect(row(hero)?.detail == "1.2 MB \u{2192} 264 KB")
+        #expect(row(hero)?.figure == "\u{2212}78%")
+        #expect(row(hero)?.figureTint == .success)
+        #expect(row(hero)?.name == "hero.png")
+        #expect(m.heroRowID == nil)
+
+        sub.events.yield(.started(broken))
+        sub.events.yield(.failed(broken, .decodeFailed))
+        await eventually { row(broken)?.isActive == false }
+        #expect(row(broken)?.state == .failed("Couldn\u{2019}t read image"))
+        #expect(row(broken)?.detail == "Couldn\u{2019}t read image")
+        #expect(row(broken)?.figure == nil)
+        #expect(row(broken)?.output == nil)
+        // Order never changes as states change.
+        #expect(m.rows.map(\.id) == [hero.id, broken.id])
+    }
+
+    @Test func grownFileReadsAsInformation() async throws {
+        let r = try await rig(); defer { r.env.cleanUp() }
+        let m = r.module
+        m.convert([.file(URL(fileURLWithPath: "/tmp/settings-panel.png"))])
+        let sub = try #require(r.runner.submissions.last)
+        sub.events.yield(.succeeded(sub.jobs[0], result(sub.jobs[0], input: 86_000, output: 91_000)))
+        await eventually { m.batch?.isRunning == false }
+        let row = try #require(m.rows.first)
+        #expect(row.figure == "+6%")
+        #expect(row.figureTint == .secondary)
+        #expect(m.liveActivity?.leading == .symbol("checkmark.circle.fill", tint: .secondary))
+        #expect(m.liveActivity?.trailing == .text("+6%"))
+        #expect(r.haptics.count == 1)
+    }
+
+    @Test func visibleWindowFollowsTheWork() async throws {
+        let r = try await rig(); defer { r.env.cleanUp() }
+        let m = r.module
+        m.convert((1...6).map { .file(URL(fileURLWithPath: "/tmp/f\($0).png")) })
+        let sub = try #require(r.runner.submissions.first)
+        #expect(m.visibleRows.map(\.name) == ["f1.png", "f2.png", "f3.png"])
+        for job in sub.jobs.prefix(3) { sub.events.yield(.succeeded(job, result(job, input: 10, output: 5))) }
+        sub.events.yield(.started(sub.jobs[3]))
+        await eventually { m.batch?.completed == 3 && m.heroRowID == sub.jobs[3].id }
+        #expect(m.visibleRows.map(\.name) == ["f3.png", "f4.png", "f5.png"])
+        for job in sub.jobs.dropFirst(3) { sub.events.yield(.succeeded(job, result(job, input: 10, output: 5))) }
+        await eventually { m.batch?.isRunning == false }
+        #expect(m.visibleRows.map(\.name) == ["f4.png", "f5.png", "f6.png"])
+
+        // A new batch goes on top; older history is trimmed to what fits.
+        m.convert([.file(URL(fileURLWithPath: "/tmp/new.png"))])
+        #expect(m.rows.map(\.name) == ["new.png", "f1.png", "f2.png", "f3.png"])
+        #expect(m.visibleRows.map(\.name) == ["new.png", "f1.png", "f2.png"])
     }
 
     @Test func activityProgressesThenSummarisesAndExpires() async throws {
@@ -203,13 +309,10 @@ extension ImageSource {
         await eventually("done") { m.batch?.isRunning == false }
         a = try #require(m.liveActivity)
         #expect(a.leading == .symbol("checkmark.circle.fill", tint: .success))
-        #expect(a.trailing == .text(Format.saving(0.78)))   // 880 of 4000 bytes
-        #expect(a.trailing == .text("\u{2212}78%"))
+        #expect(a.trailing == .text("\u{2212}78%"))   // 880 of 4000 bytes
         #expect(a.expiresAt == r.clock.now.addingTimeInterval(4))
         #expect(a.id == "convert.batch")
         #expect(r.haptics.count == 1)
-        #expect(m.recent.map(\.name) == ["c.webp", "b.webp", "a.webp"])
-        #expect(m.recent.first?.detail == "2 KB \u{2192} 440 B")
         #expect(r.env.shelf.added.count == 3)
 
         // The arbiter drops it at the expiry instant even before the module clears it.
@@ -219,37 +322,29 @@ extension ImageSource {
         r.gate.open()
         await eventually("cleared") { m.liveActivity == nil }
         #expect(m.batch == nil)
-        #expect(m.recent.count == 3)
+        #expect(m.rows.count == 3)
+        #expect(m.headerTrailing == "WebP")
     }
 
-    @Test func growthAndFailuresWarn() async throws {
+    @Test func failuresWarn() async throws {
         let r = try await rig(); defer { r.env.cleanUp() }
         let m = r.module
-        m.convert([.file(URL(fileURLWithPath: "/tmp/tiny.png"))])
-        var sub = try #require(r.runner.submissions.last)
-        sub.events.yield(.succeeded(sub.jobs[0], result(sub.jobs[0], input: 100, output: 112)))
-        await eventually { m.batch?.isRunning == false }
-        #expect(m.liveActivity?.leading == .symbol("checkmark.circle.fill", tint: .warning))
-        #expect(m.liveActivity?.trailing == .text("+12%"))
-
         m.convert([.file(URL(fileURLWithPath: "/tmp/x.png")), .file(URL(fileURLWithPath: "/tmp/y.png"))])
-        #expect(m.batch?.total == 2)  // a finished batch is replaced, not extended
-        sub = try #require(r.runner.submissions.last)
+        var sub = try #require(r.runner.submissions.last)
         sub.events.yield(.failed(sub.jobs[0], .decodeFailed))
         sub.events.yield(.succeeded(sub.jobs[1], result(sub.jobs[1], input: 1000, output: 500)))
         await eventually { m.batch?.isRunning == false }
         #expect(m.liveActivity?.leading == .symbol("exclamationmark.triangle.fill", tint: .warning))
         #expect(m.liveActivity?.trailing == .text("\u{2212}50%"))
-        #expect(m.recent.contains { $0.failure == ConversionError.decodeFailed.message && $0.name == "x.png" })
 
         m.convert([.file(URL(fileURLWithPath: "/tmp/z.webp"))])
+        #expect(m.batch?.total == 1)  // a finished batch is replaced, not extended
         sub = try #require(r.runner.submissions.last)
         sub.events.yield(.failed(sub.jobs[0], .alreadyWebP))
         await eventually { m.batch?.isRunning == false }
         #expect(m.liveActivity?.leading == .symbol("exclamationmark.triangle.fill", tint: .warning))
         #expect(m.liveActivity?.trailing == .text("Failed"))
-        #expect(r.haptics.count == 2)  // not for the all-failed batch
-        #expect(m.recent.count == ConvertModule.recentLimit)
+        #expect(r.haptics.count == 1)  // not for the all-failed batch
     }
 
     @Test func dropsDuringABatchExtendIt() async throws {
@@ -259,6 +354,7 @@ extension ImageSource {
         m.convert([.file(URL(fileURLWithPath: "/tmp/b.png")), .file(URL(fileURLWithPath: "/tmp/c.png"))])
         #expect(m.batch?.total == 3)
         #expect(m.liveActivity?.trailing == .text("0/3"))
+        #expect(m.rows.map(\.name) == ["a.png", "b.png", "c.png"])
         let first = r.runner.submissions[0], second = r.runner.submissions[1]
         first.events.yield(.succeeded(first.jobs[0], result(first.jobs[0], input: 10, output: 5)))
         await eventually { m.batch?.completed == 1 }
@@ -283,34 +379,45 @@ extension ImageSource {
         let outputs = Set(env.shelf.added.flatMap(\.urls).map(\.standardizedFileURL))
         #expect(outputs == [folder.appending(path: "hero.webp").standardizedFileURL, env.directories.downloads.appending(path: "pasted.webp").standardizedFileURL])
         #expect(outputs.allSatisfy { FileManager.default.fileExists(atPath: $0.path) })
-        await eventually("thumbnails") { module.recent.allSatisfy { $0.thumbnail != nil } }
-        #expect(module.recent.count == 2)
+        await eventually("thumbnails") { module.rows.allSatisfy { $0.thumbnail != nil } }
+        #expect(module.rows.map(\.name) == ["hero.png", "pasted.png"])
+    }
+
+    @Test func samplesShowTheThreeStates() {
+        #expect(ConvertModule.sample(.empty).rows.isEmpty)
+        let converting = ConvertModule.sample(.converting)
+        #expect(converting.headerTrailing == "2/5")
+        #expect(converting.visibleRows.map(\.detail) == ["1.2 MB \u{2192} 264 KB", "Converting\u{2026}", "Waiting"])
+        #expect(converting.liveActivity?.trailing == .text("2/5"))
+        let done = ConvertModule.sample(.done)
+        #expect(done.headerTrailing == "WebP")
+        #expect(done.visibleRows.compactMap(\.figure) == ["\u{2212}78%", "\u{2212}73%", "+6%"])
+        #expect(done.liveActivity == nil)
     }
 
     // MARK: - Looking at the card
 
     @Test func snapshots() async throws {
-        let dir = FileManager.default.temporaryDirectory.appending(path: "convert-snapshots", directoryHint: .isDirectory)
+        let dir = FileManager.default.temporaryDirectory.appending(path: "convert-snapshots-v2", directoryHint: .isDirectory)
+        try ViewSnapshot.write(module: ConvertModule.sample(.empty), to: dir.appending(path: "1-empty.png"))
+        try ViewSnapshot.write(module: ConvertModule.sample(.converting), to: dir.appending(path: "2-converting.png"))
+        try ViewSnapshot.write(module: ConvertModule.sample(.done), to: dir.appending(path: "3-done-grown.png"))
+
         let r = try await rig(); defer { r.env.cleanUp() }
-        try ViewSnapshot.write(module: r.module, to: dir.appending(path: "1-empty.png"))
-        r.module.showingOptions = true
-        r.module.cycleMaxEdge(); r.module.cycleMaxEdge()
-        try ViewSnapshot.write(module: r.module, to: dir.appending(path: "2-options.png"))
-        r.module.toggleLossless(); r.module.toggleStripMetadata()
-        try ViewSnapshot.write(module: r.module, to: dir.appending(path: "3-options-lossless.png"))
-        let sample = ConvertModule.sample()
-        try ViewSnapshot.write(module: sample, to: dir.appending(path: "4-sample-running.png"))
-        let done = ConvertModule.sample(inFlight: false)
-        try ViewSnapshot.write(module: done, to: dir.appending(path: "5-sample-idle.png"))
-        #expect(sample.liveActivity?.trailing == .text("3/12"))
-        #expect(done.liveActivity == nil)
-        r.module.showingOptions = false
-        r.module.convert([.file(URL(fileURLWithPath: "/tmp/Screenshot 2026-11-21 at 10.42.png")), .file(URL(fileURLWithPath: "/tmp/broken.jpg"))])
+        r.module.convert(["Screenshot 2026-11-21 at 10.42.png", "broken.jpg", "spinner.png"].map { .file(URL(fileURLWithPath: "/tmp/\($0)")) })
         let sub = try #require(r.runner.submissions.last)
         sub.events.yield(.succeeded(sub.jobs[0], result(sub.jobs[0], input: 2_400_000, output: 310_000)))
         sub.events.yield(.failed(sub.jobs[1], .decodeFailed))
+        sub.events.yield(.started(sub.jobs[2]))
+        await eventually { r.module.heroRowID == sub.jobs[2].id }
+        try ViewSnapshot.write(module: r.module, to: dir.appending(path: "4-failed-spinner.png"))
+        sub.events.yield(.succeeded(sub.jobs[2], result(sub.jobs[2], input: 2_400_000, output: 2_400_000)))
         await eventually { r.module.batch?.isRunning == false }
-        try ViewSnapshot.write(module: r.module, to: dir.appending(path: "6-done-with-failure.png"))
+        try ViewSnapshot.write(module: r.module, to: dir.appending(path: "5-failed-done.png"))
+        r.module.setQuality(60)
+        try ViewSnapshot.write(module: r.module, to: dir.appending(path: "6-header-quality.png"))
+        r.module.showingOptions = true
+        try ViewSnapshot.write(module: r.module, to: dir.appending(path: "7-options.png"))
         print("snapshots in \(dir.path)")
     }
 }

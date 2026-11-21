@@ -149,10 +149,17 @@ import UniformTypeIdentifiers
             switch e {
             case .started: inFlight += 1; peak = max(peak, inFlight)
             case .succeeded, .failed: inFlight -= 1
-            case .progress: break
+            case .progress, .fileProgress: break
             }
         }
         #expect(events.results.count == 6)
         #expect(peak <= 2)
+        // Per-file progress arrives between a file's start and its result, rising to 1.
+        for job in events.compactMap({ if case .started(let j) = $0 { j } else { nil } }) {
+            let fractions = events.compactMap { e -> Double? in
+                if case .fileProgress(let j, let f) = e, j.id == job.id { f } else { nil }
+            }
+            #expect(fractions.count >= 3 && fractions == fractions.sorted() && fractions.last == 1, "\(fractions)")
+        }
     }
 }

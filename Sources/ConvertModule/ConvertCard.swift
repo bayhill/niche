@@ -1,151 +1,146 @@
+import CoreGraphics
 import ImageEngine
 import NotchCore
 import SwiftUI
 
-/// The Home dashboard card (centre slot).
+/// The Home dashboard card (trailing slot): a header, then one row per file.
 struct ConvertCard: View {
     let module: ConvertModule
 
     var body: some View {
-        let options = module.options
+        let running = module.batch?.isRunning == true
         GlassCard(spacing: Tokens.Spacing.s) {
-            SectionHeader("WebP", symbol: "photo") {
-                if !module.showingOptions {
-                    Text(ConvertSettings.shortSummary(options)).notchStyle(.caption).lineLimit(1)
-                        .contentTransition(.numericText()).transition(.opacity)
+            SectionHeader("Convert", symbol: "photo") {
+                Group {
+                    if module.showingOptions {
+                        HeaderButton(title: "Done", help: "Close options") { toggleOptions() }
+                    } else if running {
+                        Text(module.headerTrailing)
+                            .font(NotchTextStyle.numeric.font)
+                            .foregroundStyle(Tokens.Colors.textSecondary)
+                            .contentTransition(.numericText())
+                            .accessibilityLabel("\(module.batch?.completed ?? 0) of \(module.batch?.total ?? 0) converted")
+                    } else {
+                        HeaderButton(title: module.headerTrailing, help: "Conversion options") { toggleOptions() }
+                            .accessibilityLabel("Conversion options, \(ConvertSettings.summary(module.options))")
+                    }
                 }
-                GlassIconButton(
-                    module.showingOptions ? "checkmark" : "slider.horizontal.3",
-                    label: module.showingOptions ? "Done" : "Conversion options", kind: .plain, size: 20
-                ) {
-                    Motion.animate(Motion.morph) { module.showingOptions.toggle() }
-                }
-                .contentTransition(.symbolEffect(.replace))
+                .transition(.opacity)
             }
 
             ZStack(alignment: .top) {
                 if module.showingOptions {
                     OptionsPanel(module: module)
                         .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .top)))
-                } else if module.recent.isEmpty && module.batch == nil {
-                    DropInvite().transition(.opacity)
+                } else if module.rows.isEmpty {
+                    EmptyState(symbol: "photo", title: "Drop images on the notch", message: "PNG, JPEG and HEIC become WebP")
+                        .transition(.opacity)
                 } else {
-                    ResultsList(module: module).transition(.opacity)
+                    RowList(module: module).transition(.opacity)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .motion(Motion.morph, value: module.showingOptions)
-        .motion(Motion.quick, value: options)
+        .motion(Motion.morph, value: running)
+        .motion(Motion.quick, value: module.options)
     }
+
+    private func toggleOptions() { Motion.animate(Motion.morph) { module.showingOptions.toggle() } }
 }
 
-/// Inviting empty state before the first conversion.
-private struct DropInvite: View {
+/// A quiet text control in the header: hover fill from `RowButtonStyle`, laid out as if it were plain text.
+private struct HeaderButton: View {
+    let title: String
+    let help: String
+    let action: () -> Void
+
     var body: some View {
-        EmptyState(symbol: "photo.badge.arrow.down", title: "Drop images on the notch", message: "WebP lands next to the original")
-            .padding(Tokens.Spacing.s)
-            .background {
-                RoundedRectangle(cornerRadius: Tokens.Radius.control, style: .continuous)
-                    .strokeBorder(Tokens.Colors.cardStroke, style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
-            }
-            .motionAppear()
+        Button(action: action) {
+            Text(title).notchStyle(.caption).lineLimit(1).contentTransition(.numericText())
+        }
+        .buttonStyle(RowButtonStyle())
+        .padding(.horizontal, -6)
+        .padding(.vertical, -4)
+        .help(help)
     }
 }
 
-private struct ResultsList: View {
+private struct RowList: View {
     let module: ConvertModule
 
     var body: some View {
+        let visible = module.visibleRows
+        let hero = module.heroRowID
         VStack(alignment: .leading, spacing: 0) {
-            if let batch = module.batch {
-                BatchStrip(batch: batch)
-                    .padding(.bottom, Tokens.Spacing.xs)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-            }
-            ForEach(Array(module.recent.prefix(ConvertModule.recentLimit).enumerated()), id: \.element.id) { index, item in
-                ResultButton(item: item) { module.open(item) }
+            ForEach(Array(visible.enumerated()), id: \.element.id) { index, row in
+                FileRow(row: row, isHero: row.id == hero) { module.open(row) }
                     .transition(.asymmetric(insertion: .move(edge: .top).combined(with: .opacity), removal: .opacity))
                     .motionAppear(index)
             }
         }
-        .motion(Motion.morph, value: module.recent.map(\.id))
-        .motion(Motion.morph, value: module.batch == nil)
+        .motion(Motion.morph, value: visible.map(\.id))
     }
 }
 
-/// "Converting… 3/12" while running; the total saving once done. Its glyph is the hero for the wing.
-private struct BatchStrip: View {
-    let batch: BatchProgress
+/// One file in any state. Always a `ResultRow` so state changes morph in place; while converting, a ring covers
+/// the leading slot. Finished rows reveal the file on click and drag out as files.
+private struct FileRow: View {
+    let row: ConvertRow
+    let isHero: Bool
+    let action: () -> Void
+
+    /// Lets the ring draw the leading slot itself (`ResultRow` has no slot for a custom view).
+    private static let clearThumbnail: SendableImage? = {
+        guard let ctx = CGContext(data: nil, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
+              let image = ctx.makeImage()
+        else { return nil }
+        return SendableImage(image)
+    }()
 
     var body: some View {
-        let saved = batch.savedFraction
-        let warn = batch.failed > 0 || (saved ?? 0) < 0 || saved == nil
-        let tint: TintRole = batch.isRunning ? .accent : (warn ? .warning : .success)
-        HStack(spacing: Tokens.Spacing.s) {
-            ZStack {
-                if batch.isRunning {
-                    ProgressRing(progress: batch.fraction, size: 14, lineWidth: 2)
-                } else {
-                    Image(systemName: warn ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
-                        .font(NotchTextStyle.title.font)
-                        .foregroundStyle(tint.color)
-                        .transition(.scale.combined(with: .opacity))
+        let converting: Double?? = if case .converting(let p) = row.state { .some(p) } else { .none }
+        let failed = if case .failed = row.state { true } else { false }
+        Button(action: action) {
+            ResultRow(
+                thumbnail: converting != nil ? Self.clearThumbnail : row.thumbnail,
+                symbol: failed ? "exclamationmark.triangle" : "photo",
+                symbolTint: failed ? .warning : .secondary,
+                title: row.name, detail: row.detail,
+                trailing: row.figure, trailingTint: row.figureTint
+            )
+            .overlay(alignment: .leading) {
+                if let progress = converting {
+                    ring(progress).transition(.opacity)
                 }
             }
-            .frame(width: 16, height: 16)
-            .notchHero(.convert)
-
-            Text(caption).notchStyle(.caption).lineLimit(1).contentTransition(.numericText())
-            Spacer(minLength: Tokens.Spacing.xs)
-            Text(figure)
-                .font(NotchTextStyle.numeric.font)
-                .foregroundStyle(batch.isRunning ? Tokens.Colors.textPrimary : tint.color)
-                .contentTransition(.numericText())
-                .lineLimit(1).fixedSize()
         }
-        .frame(height: 18)
-        .motion(Motion.morph, value: batch)
+        .buttonStyle(RowButtonStyle())
+        .allowsHitTesting(row.output != nil)
+        .fileDragSource(row.output.map { [$0] } ?? [])
+        .padding(.horizontal, -6)
+        .motion(Motion.morph, value: row.state)
+        .help(help)
         .accessibilityElement(children: .combine)
     }
 
-    private var caption: String {
-        if batch.isRunning { return "Converting\u{2026}" }
-        if batch.succeeded == 0 { return batch.total == 1 ? "Failed" : "All failed" }
-        if batch.failed > 0 { return "\(batch.failed) failed" }
-        return batch.total == 1 ? "Done" : "\(batch.succeeded) converted"
-    }
-
-    private var figure: String {
-        if batch.isRunning { return "\(batch.completed)/\(batch.total)" }
-        return batch.savedFraction.map(Format.saving) ?? "\(batch.failed)/\(batch.total)"
-    }
-}
-
-/// A result row: click reveals in Finder, drag carries the file out.
-private struct ResultButton: View {
-    let item: ConvertedItem
-    let action: () -> Void
-
-    var body: some View {
-        let failed = item.failure != nil
-        Button(action: action) {
-            ResultRow(
-                thumbnail: item.thumbnail, symbol: failed ? "exclamationmark.triangle" : "photo",
-                symbolTint: failed ? .warning : .secondary, title: item.name, detail: item.detail,
-                trailing: failed ? nil : Format.saving(item.savedFraction),
-                trailingTint: item.savedFraction < 0 ? .warning : .success
-            )
+    @ViewBuilder private func ring(_ progress: Double?) -> some View {
+        let slot = ZStack {
+            Tokens.Colors.cardFill
+            if let progress {
+                ProgressRing(progress: progress, size: 16, lineWidth: 2)
+            } else {
+                SpinnerRing(size: 16, lineWidth: 2)
+            }
         }
-        .buttonStyle(RowButtonStyle())
-        .disabled(failed)
-        .fileDragSource(item.output.map { [$0] } ?? [])
-        .padding(.horizontal, -6)
-        .help(help)
+        .frame(width: 26, height: 26)
+        .clipShape(RoundedRectangle(cornerRadius: Tokens.Radius.thumbnail, style: .continuous))
+        if isHero { slot.notchHero(.convert) } else { slot }
     }
 
     private var help: String {
-        let lines = (item.failure == nil ? ["Click to show in Finder, or drag it out"] : []) + item.notes
+        let lines = (row.output != nil ? ["Click to reveal in Finder, or drag out"] : []) + row.notes
         return lines.joined(separator: "\n")
     }
 }
