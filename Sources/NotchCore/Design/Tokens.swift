@@ -115,8 +115,11 @@ public enum PanelLayout {
     /// Widest a wing may grow when the activity carries `leadingText`/`trailingText`. Both wings take the same
     /// width (that of the longer side) so the notch stays symmetric.
     public static let wingMaxWidth: CGFloat = 150
-    /// How much the notch swells on hover.
-    public static let hoverGrowth = CGSize(width: 12, height: 6)
+    /// How much the notch swells on hover: slightly wider, and tall enough below the hardware notch for the
+    /// one-line hover hint ("Click to expand Notcher").
+    public static let hoverGrowth = CGSize(width: 16, height: 22)
+    /// The hover swell when no hint is shown (hover already opens the panel).
+    public static let hoverGrowthCompact = CGSize(width: 12, height: 6)
     /// Drop target shown while a drag is near the notch.
     public static let dropSize = CGSize(width: 420, height: 92)
     /// Expanded panel content, below the notch band.
