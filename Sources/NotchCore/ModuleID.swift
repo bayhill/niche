@@ -14,4 +14,6 @@ public struct ModuleID: Hashable, Sendable, Codable, RawRepresentable, Expressib
     public static let nowPlaying: ModuleID = "nowPlaying"
     public static let calendar: ModuleID = "calendar"
     public static let claudeAgents: ModuleID = "claudeAgents"
+    public static let screenshots: ModuleID = "screenshots"
+    public static let colour: ModuleID = "colour"
 }

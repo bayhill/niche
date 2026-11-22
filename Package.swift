@@ -43,7 +43,7 @@ let package = Package(
             name: "NotcherApp",
             dependencies: [
                 "NotchCore", "NotchUI", "ImageEngine", "ConvertModule", "ShelfModule", "ClipboardModule",
-                "NowPlayingModule", "CalendarModule", "ClaudeAgentsModule",
+                "NowPlayingModule", "CalendarModule", "ClaudeAgentsModule", "ScreenshotsModule", "ColourModule",
             ],
             swiftSettings: swift6
         ),
@@ -54,4 +54,6 @@ let package = Package(
     + module("NowPlayingModule")
     + module("CalendarModule")
     + module("ClaudeAgentsModule")
+    + module("ScreenshotsModule")
+    + module("ColourModule")
 )

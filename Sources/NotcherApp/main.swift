@@ -2,10 +2,12 @@ import AppKit
 import CalendarModule
 import ClaudeAgentsModule
 import ClipboardModule
+import ColourModule
 import ConvertModule
 import NotchCore
 import NotchUI
 import NowPlayingModule
+import ScreenshotsModule
 import ShelfModule
 import SwiftUI
 
@@ -64,6 +66,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             nowPlaying,
             debug.fixtures ? CalendarModule.sample() : CalendarModule.live(),
             debug.fixtures ? ClaudeAgentsModule.sample() : ClaudeAgentsModule.live(),
+            debug.fixtures ? ScreenshotsModule.sample() : ScreenshotsModule.live(),
+            debug.fixtures ? ColourModule.sample() : ColourModule.live(),
         ]
         self.converter = convert
         self.shelf = shelf
