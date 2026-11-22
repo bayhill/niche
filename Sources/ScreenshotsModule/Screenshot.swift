@@ -1,7 +1,6 @@
 import Foundation
-import UniformTypeIdentifiers
 
-/// Width and height in pixels, as Spotlight reports them.
+/// Width and height in pixels.
 public struct PixelSize: Sendable, Equatable, Hashable {
     public var width: Int
     public var height: Int
@@ -11,15 +10,15 @@ public struct PixelSize: Sendable, Equatable, Hashable {
     public var text: String { "\(width) \u{00D7} \(height)" }
 }
 
-/// One screenshot file, described from its Spotlight attributes. Building one never opens the file.
+/// One screenshot file, described by its attributes.
 public struct Screenshot: Sendable, Equatable, Hashable, Identifiable {
     public var url: URL
-    /// When the screenshot was taken (Spotlight's content creation date, else the file's creation date).
+    /// When the screenshot was taken (the file's creation date).
     public var createdAt: Date
     /// Changes when the file is edited (Markup): part of the thumbnail cache key.
     public var modifiedAt: Date?
     public var pixelSize: PixelSize?
-    /// Size in bytes, if Spotlight knows it.
+    /// Size in bytes, if known.
     public var bytes: Int64?
 
     public init(url: URL, createdAt: Date, modifiedAt: Date? = nil, pixelSize: PixelSize? = nil, bytes: Int64? = nil) {
@@ -31,23 +30,10 @@ public struct Screenshot: Sendable, Equatable, Hashable, Identifiable {
 
     /// The key used for de-duplication: `.`/`..` removed. Symlinks are not resolved: that would touch the disk.
     public var dedupeKey: String { url.standardizedFileURL.path }
-
-    /// A screenshot from raw Spotlight attributes, or `nil` when the item is not a still image (screen recordings
-    /// carry the same screen-capture flag) or has no path or date.
-    /// - Parameter contentType: `kMDItemContentType`, a uniform type identifier.
-    public static func fromSpotlight(
-        path: String?, contentType: String?, contentCreated: Date?, fileCreated: Date?, modified: Date?,
-        pixelWidth: Int?, pixelHeight: Int?, bytes: Int64?
-    ) -> Screenshot? {
-        guard let path, !path.isEmpty, let created = contentCreated ?? fileCreated else { return nil }
-        guard let identifier = contentType, let type = UTType(identifier), type.conforms(to: .image) else { return nil }
-        let size: PixelSize? = if let w = pixelWidth, let h = pixelHeight, w > 0, h > 0 { PixelSize(width: w, height: h) } else { nil }
-        return Screenshot(url: URL(fileURLWithPath: path), createdAt: created, modifiedAt: modified, pixelSize: size, bytes: bytes)
-    }
 }
 
 /// The screenshots on the page: newest first, recent only, one entry per file, capped. A pure value type so the
-/// rules are testable without Spotlight. Rebuilt from the source's results; never persisted.
+/// rules are testable without a folder. Rebuilt from the source's results; never persisted.
 public struct ScreenshotList: Sendable, Equatable {
     public static let defaultCapacity = 12
     /// Only screenshots taken this recently are listed.

@@ -2,11 +2,12 @@ import Foundation
 import NotchCore
 import NotchCoreTesting
 import Testing
+import UniformTypeIdentifiers
 @testable import ScreenshotsModule
 
 // MARK: - Fakes
 
-/// Stands in for Spotlight: records what the module asked for and delivers whatever the test sends.
+/// Stands in for the screenshot folder: records what the module asked for and delivers whatever the test sends.
 @MainActor
 final class FakeSource: ScreenshotSource {
     private(set) var calls: [String] = []
@@ -151,22 +152,7 @@ func eventually(_ condition: @MainActor () -> Bool) async throws {
         #expect(ScreenshotList([trashed, c], now: now).items.map(\.name) == ["c.png"])
     }
 
-    @Test func spotlightAttributes() {
-        let date = now
-        func make(path: String? = "/tmp/a.png", type: String? = "public.png", content: Date? = date, file: Date? = nil,
-                  width: Int? = 100, height: Int? = 50) -> Screenshot? {
-            Screenshot.fromSpotlight(path: path, contentType: type, contentCreated: content, fileCreated: file, modified: nil,
-                                     pixelWidth: width, pixelHeight: height, bytes: 1234)
-        }
-        #expect(make()?.pixelSize == PixelSize(width: 100, height: 50))
-        #expect(make()?.bytes == 1234)
-        #expect(make(type: "public.heic") != nil)
-        #expect(make(type: "com.apple.quicktime-movie") == nil)  // screen recordings carry the same flag
-        #expect(make(type: nil) == nil)
-        #expect(make(path: nil) == nil)
-        #expect(make(content: nil) == nil)
-        #expect(make(content: nil, file: date.addingTimeInterval(-5))?.createdAt == date.addingTimeInterval(-5))
-        #expect(make(width: 0)?.pixelSize == nil)
+    @Test func pixelSizeText() {
         #expect(PixelSize(width: 2940, height: 1912).text == "2940 \u{00D7} 1912")
     }
 }
@@ -302,7 +288,7 @@ func eventually(_ condition: @MainActor () -> Bool) async throws {
         rig.source.send([gone, kept], initial: true)
         await rig.module.loadThumbnail(for: gone)
         #expect(rig.module.screenshots == [kept])
-        // Spotlight may still report it for a moment: it stays out.
+        // The source may still report it for a moment: it stays out.
         rig.source.send([gone, kept])
         #expect(rig.module.screenshots == [kept])
         #expect(rig.module.liveActivity == nil)
@@ -505,5 +491,168 @@ func eventually(_ condition: @MainActor () -> Bool) async throws {
         }
         try ViewSnapshot.write(module: sample, to: Self.dir.appending(path: "screenshots-module.png"))
         print("snapshots in \(Self.dir.path)")
+    }
+}
+
+// MARK: - The screenshot folder
+
+/// A folder of its own under the temporary directory, standing in for the one screenshots are saved in.
+struct ShotFolder {
+    let url: URL
+
+    init() throws {
+        url = FileManager.default.temporaryDirectory.appending(path: "notcher-shots-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    }
+
+    func cleanUp() { try? FileManager.default.removeItem(at: url) }
+
+    @discardableResult
+    func image(_ name: String, type: UTType = .png, width: Int = 12, height: Int = 8, created: Date? = nil, flagged: Bool = false) throws -> URL {
+        let file = try TestImage.write(TestImage.solid(width: width, height: height), to: url.appending(path: name), type: type)
+        if let created { try FileManager.default.setAttributes([.creationDate: created], ofItemAtPath: file.path) }
+        if flagged { try flag(file) }
+        return file
+    }
+
+    /// What macOS writes on a screenshot it takes.
+    func flag(_ file: URL, _ value: Bool = true) throws {
+        let data = try PropertyListSerialization.data(fromPropertyList: value, format: .binary, options: 0)
+        let status = data.withUnsafeBytes { setxattr(file.path, FolderScreenshotSource.screenCaptureFlag, $0.baseAddress, data.count, 0, 0) }
+        #expect(status == 0)
+    }
+}
+
+@Suite struct FolderScanTests {
+    let now = Date()
+    var since: Date { now.addingTimeInterval(-ScreenshotList.window) }
+
+    @Test func aFolderOfItsOwnListsEveryRecentImage() throws {
+        let folder = try ShotFolder()
+        defer { folder.cleanUp() }
+        try folder.image("system.jpg", type: .jpeg, width: 40, height: 20, created: now.addingTimeInterval(-60), flagged: true)
+        try folder.image("other-tool.png", created: now.addingTimeInterval(-120))
+        try folder.image("yesterday.png", created: now.addingTimeInterval(-30 * 3600))
+        try folder.image(".in-progress.png")
+        try Data("notes".utf8).write(to: folder.url.appending(path: "notes.txt"))
+        try Data([0, 1, 2]).write(to: folder.url.appending(path: "recording.mov"))
+        try FileManager.default.createDirectory(at: folder.url.appending(path: "Old.png"), withIntermediateDirectories: true)
+
+        let shots = FolderScreenshotSource.scan(folder.url, since: since, dedicated: true)
+        #expect(shots.map(\.name) == ["system.jpg", "other-tool.png"])
+        #expect(shots.first?.pixelSize == PixelSize(width: 40, height: 20))
+        #expect((shots.first?.bytes ?? 0) > 0)
+        #expect(shots.first?.modifiedAt != nil)
+    }
+
+    @Test func aSharedFolderListsOnlyWhatMacOSFlagged() throws {
+        let folder = try ShotFolder()
+        defer { folder.cleanUp() }
+        try folder.image("Screenshot.png", flagged: true)
+        try folder.image("holiday.png")
+        let notOne = try folder.image("unflagged.png")
+        try folder.flag(notOne, false)
+
+        #expect(FolderScreenshotSource.scan(folder.url, since: since, dedicated: false).map(\.name) == ["Screenshot.png"])
+        #expect(FolderScreenshotSource.hasScreenCaptureFlag(notOne) == false)
+        // Worked out from the path: a folder under the temporary directory is nobody's Desktop.
+        #expect(FolderScreenshotSource.scan(folder.url, since: since).count == 3)
+    }
+
+    @Test func aMissingFolderHasNoScreenshots() {
+        let nowhere = FileManager.default.temporaryDirectory.appending(path: "notcher-none-\(UUID().uuidString)")
+        #expect(FolderScreenshotSource.scan(nowhere, since: since).isEmpty)
+        #expect(FolderScreenshotSource.probe(nowhere) == .unknown)
+    }
+
+    @Test func theNewestAreKeptWhenThereAreMany() throws {
+        let folder = try ShotFolder()
+        defer { folder.cleanUp() }
+        for index in 1...5 { try folder.image("shot-\(index).png", created: now.addingTimeInterval(TimeInterval(-index * 60))) }
+        #expect(FolderScreenshotSource.scan(folder.url, since: since, dedicated: true, limit: 2).map(\.name) == ["shot-1.png", "shot-2.png"])
+    }
+
+    @Test func whichFoldersAreShared() {
+        let home = URL(fileURLWithPath: "/Users/someone", isDirectory: true)
+        func dedicated(_ path: String) -> Bool { FolderScreenshotSource.isDedicated(URL(fileURLWithPath: path), home: home) }
+        #expect(dedicated("/Users/someone/Documents/Screenshots"))
+        #expect(dedicated("/Users/someone/Desktop/Screenshots/"))
+        #expect(dedicated("/Volumes/Work/Shots"))
+        #expect(!dedicated("/Users/someone/Desktop"))
+        #expect(!dedicated("/Users/someone/Desktop/"))
+        #expect(!dedicated("/Users/someone/Documents/../Downloads"))
+        #expect(!dedicated("/Users/someone/Pictures"))
+        #expect(!dedicated("/Users/someone"))
+    }
+
+    @Test func aConversionBesideItsScreenshotIsNotAnotherScreenshot() {
+        func shot(_ name: String) -> Screenshot { Screenshot(url: URL(fileURLWithPath: "/tmp/shots/\(name)"), createdAt: now) }
+        let kept = FolderScreenshotSource.withoutConversions([shot("a.png"), shot("a.webp"), shot("b.WEBP"), shot("c.jpg")])
+        #expect(kept.map(\.name) == ["a.png", "b.WEBP", "c.jpg"])
+    }
+
+    @Test func rule() {
+        func listed(_ type: UTType, age: TimeInterval = 60, dedicated: Bool = true, flagged: Bool = false) -> Bool {
+            FolderScreenshotSource.isScreenshot(
+                type: type, created: now.addingTimeInterval(-age), since: since, inDedicatedFolder: dedicated, isFlagged: flagged
+            )
+        }
+        #expect(listed(.png))
+        #expect(listed(.heic))
+        #expect(!listed(.quickTimeMovie, flagged: true))  // screen recordings are saved in the same folder
+        #expect(!listed(.png, age: 25 * 3600))
+        #expect(!listed(.png, dedicated: false))
+        #expect(listed(.png, dedicated: false, flagged: true))
+    }
+}
+
+@MainActor @Suite struct FolderScreenshotSourceTests {
+    /// Waits for `condition`, for as long as a busy machine may need.
+    private func eventually(_ condition: @MainActor () -> Bool) async -> Bool {
+        for _ in 0..<400 {
+            if condition() { return true }
+            try? await Task.sleep(for: .milliseconds(25))
+        }
+        return condition()
+    }
+
+    @Test func reportsWhatIsThereThenWhatArrives() async throws {
+        let folder = try ShotFolder()
+        defer { folder.cleanUp() }
+        try folder.image("before.png", created: Date().addingTimeInterval(-300))
+        let url = folder.url
+        let source = FolderScreenshotSource(folder: { url }, settle: .milliseconds(30), followUp: .milliseconds(60))
+        var batches: [ScreenshotBatch] = []
+        source.start { batches.append($0) }
+        defer { source.stop() }
+
+        #expect(await eventually { !batches.isEmpty })
+        #expect(batches.first?.isInitial == true)
+        #expect(batches.first?.screenshots.map(\.name) == ["before.png"])
+
+        try folder.image("after.png")
+        #expect(await eventually { batches.last?.screenshots.count == 2 })
+        #expect(batches.last?.isInitial == false)
+        #expect(batches.last?.screenshots.map(\.name) == ["after.png", "before.png"])
+
+        try FileManager.default.removeItem(at: url.appending(path: "before.png"))
+        #expect(await eventually { batches.last?.screenshots.map(\.name) == ["after.png"] })
+
+        source.stop()
+        let count = batches.count
+        try folder.image("late.png")
+        try? await Task.sleep(for: .milliseconds(200))
+        #expect(batches.count == count)
+    }
+
+    @Test func aFolderThatIsNotThereReportsNothing() async {
+        let nowhere = FileManager.default.temporaryDirectory.appending(path: "notcher-none-\(UUID().uuidString)")
+        let source = FolderScreenshotSource(folder: { nowhere })
+        var batches: [ScreenshotBatch] = []
+        source.start { batches.append($0) }
+        defer { source.stop() }
+        #expect(await eventually { !batches.isEmpty })
+        #expect(batches.first == ScreenshotBatch(screenshots: [], isInitial: true))
+        #expect(await source.requestFolderAccess() == .unknown)
     }
 }

@@ -260,7 +260,7 @@ struct ScreenshotsSettings: View {
                 ))
             } footer: {
                 Text(
-                    "Screenshots from the last 24 hours, found with Spotlight wherever they are saved. Files are never "
+                    "Screenshots from the last 24 hours, read from the folder macOS saves them in. Files are never "
                         + "moved, renamed or deleted, and nothing is kept after quitting. macOS may ask for access to "
                         + "the folder screenshots are saved in."
                 )

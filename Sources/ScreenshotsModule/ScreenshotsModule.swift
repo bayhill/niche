@@ -6,8 +6,8 @@ import SwiftUI
 
 /// Recent screenshots, ready to drag out, convert or shelve.
 ///
-/// Dormant until the user asks for it (`enabledKey`): until then neither Spotlight nor any file is touched. Once on,
-/// a live Spotlight query lists screenshots wherever they are saved; only a thumbnail opens a file. Nothing is
+/// Dormant until the user asks for it (`enabledKey`): until then no folder and no file is touched. Once on, the
+/// folder macOS saves screenshots in is watched; a thumbnail and the size in pixels read a file. Nothing is
 /// persisted, and no screenshot is ever moved, renamed, copied or deleted.
 @MainActor
 @Observable
@@ -26,9 +26,9 @@ public final class ScreenshotsModule: NotchModule {
     public let placement: PanelPlacement = .page(order: 30)
 
     public enum Status: Sendable, Equatable {
-        /// Not asked for yet (or switched off): no query, no file access. The page offers "Show screenshots".
+        /// Not asked for yet (or switched off): no folder and no file access. The page offers "Show screenshots".
         case off
-        /// The Spotlight query is live.
+        /// The screenshot folder is being watched.
         case watching
     }
 
@@ -91,7 +91,7 @@ public final class ScreenshotsModule: NotchModule {
     @ObservationIgnored private var pruneTask: Task<Void, Never>?
 
     /// - Parameters:
-    ///   - source: finds screenshots (a live Spotlight query in the app).
+    ///   - source: finds screenshots (the screenshot folder in the app).
     ///   - thumbnails: makes tile pictures (ImageIO in the app).
     ///   - now: clock for the 24-hour window and the live activity.
     ///   - reveal: selects files in Finder.
@@ -101,7 +101,7 @@ public final class ScreenshotsModule: NotchModule {
     ///   - newWindow: a file first reported later than this after it was taken (moved or copied in) is listed, not announced.
     ///   - capacity: the most screenshots listed.
     public init(
-        source: any ScreenshotSource = SpotlightScreenshotSource(),
+        source: any ScreenshotSource = FolderScreenshotSource(),
         thumbnails: any ScreenshotThumbnailing = ImageIOThumbnails(),
         now: @escaping @MainActor () -> Date = { Date() },
         reveal: @escaping @MainActor ([URL]) -> Void = { NSWorkspace.shared.activateFileViewerSelecting($0) },
@@ -143,10 +143,10 @@ public final class ScreenshotsModule: NotchModule {
         status = .watching
     }
 
-    /// The module the app runs: Spotlight and ImageIO. Dormant until the user asks for screenshots.
+    /// The module the app runs: the screenshot folder and ImageIO. Dormant until the user asks for screenshots.
     public static func live() -> ScreenshotsModule { ScreenshotsModule() }
 
-    /// Invented screenshots with generated pictures, already showing. Touches no files and no Spotlight.
+    /// Invented screenshots with generated pictures, already showing. Touches no files and no folder.
     public static func sample() -> ScreenshotsModule {
         let now = Date()
         let (screenshots, thumbnails) = ScreenshotSamples.make(now: now)
@@ -171,7 +171,8 @@ public final class ScreenshotsModule: NotchModule {
             // consent the "Show screenshots" button would otherwise collect.
             if context.mayPrompt, !context.settings.get(Self.enabledKey) { context.settings.set(Self.enabledKey, true) }
             if context.settings.get(Self.enabledKey) {
-                // Without `mayPrompt` only the query runs here: it reads the Spotlight index, never a file.
+                // The click that set `enabledKey` is when macOS asked for the folder. Reading it here asks again
+                // only if macOS has forgotten that answer (an ad-hoc rebuild is a new app to it).
                 beginWatching(requestingAccess: context.mayPrompt)
             }
             schedulePruning()
@@ -179,7 +180,7 @@ public final class ScreenshotsModule: NotchModule {
         context.log.notice("started")
     }
 
-    /// Stops the query and every task. `start` on the same instance picks up again from the settings.
+    /// Stops watching and every task. `start` on the same instance picks up again from the settings.
     public func stop() {
         running = false
         pruneTask?.cancel(); pruneTask = nil
@@ -202,7 +203,7 @@ public final class ScreenshotsModule: NotchModule {
         stopWatching()
     }
 
-    /// "Try again" after macOS refused access: asks again and restarts the query.
+    /// "Try again" after macOS refused access: asks again and reads the folder again.
     public func retry() {
         guard !isFixture, context?.settings.get(Self.enabledKey) == true else { return }
         stopWatching()
@@ -242,8 +243,7 @@ public final class ScreenshotsModule: NotchModule {
         accessTask?.cancel()
         accessTask = Task { [weak self] in
             guard let self else { return }
-            // Touch the folder first, so that if Spotlight leaves out folders the app may not read,
-            // the first results already include it once access is allowed.
+            // Touch the folder first, so the page can say so when macOS refuses it.
             let access = await self.source.requestFolderAccess()
             guard !Task.isCancelled, self.status == .watching else { return }
             self.folderAccess = access
@@ -278,7 +278,11 @@ public final class ScreenshotsModule: NotchModule {
         for shot in batch.screenshots { seen.insert(shot.dedupeKey) }
         latest = batch.screenshots
         rebuild()
-        if batch.isInitial { gathered = true; return }
+        if batch.isInitial {
+            gathered = true
+            log?.notice("watching; \(batch.screenshots.count, privacy: .public) recent")
+            return
+        }
         // What was there when watching began is listed, never announced.
         guard gathered else { return }
         let stamp = now()
