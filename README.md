@@ -16,6 +16,12 @@ Glass.
 - **Screenshots** — the last day's screenshots as they are taken: drag one out, convert it to WebP or put it on the
   shelf. Off until switched on; read from the folder macOS saves them in, never moved or deleted.
 - **Colour** — pick any pixel on screen and copy it as hex, rgb, oklch or Display P3, with a contrast check between two picks.
+- **Dev servers** — the local servers listening on this Mac: open one in the browser, copy its address or stop it.
+  Off until switched on in Settings.
+- **Builds** — the latest GitHub Actions run for chosen repositories, on the branch that is checked out, through the
+  GitHub CLI that is already signed in. Off until switched on in Settings.
+
+The panel opens on the tab that was used last; a setting in General makes it always open on Home.
 
 ## Requirements
 
@@ -60,12 +66,15 @@ The debug flags are documented in `Sources/NotchCore/DebugOptions.swift`.
 
 ## Privacy
 
-Notcher has no telemetry and no accounts. It makes one kind of network request: when Now Playing falls back to
-AppleScript for Spotify, it downloads the album artwork from the address Spotify reports. Settings are stored in
-macOS preferences and everything else under `~/Library/Application Support/Notcher`.
+Notcher has no telemetry and no accounts. It makes two kinds of network request, both optional: when Now Playing
+falls back to AppleScript for Spotify, it downloads the album artwork from the address Spotify reports; and when
+Builds is switched on, it runs the GitHub CLI (`gh run list`) for the repositories added in Settings. Settings are
+stored in macOS preferences and everything else under `~/Library/Application Support/Notcher`.
 
 - Clipboard history is off by default, skips anything marked concealed or transient and anything copied from a
   password manager, and is never written to disk.
+- Builds never sees a token: it uses the `gh` that is installed and signed in, and does nothing without it.
+- Dev servers reads the list of listening processes with `lsof` and only stops a process when its Stop button is clicked.
 - Claude Code alerts are off by default. Enabling them in Settings installs a small plugin through the `claude` CLI,
   which adds two entries to `~/.claude/settings.json`; the plugin passes only a few short fields per event (never
   prompts or tool output), and the app deletes each event after reading it.

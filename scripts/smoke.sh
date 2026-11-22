@@ -43,6 +43,8 @@ capture shelf --force-state expanded --page shelf
 capture clipboard --force-state expanded --page clipboard
 capture screenshots --force-state expanded --page screenshots
 capture colour --force-state expanded --page colour
+capture dev-servers --force-state expanded --page devServers
+capture builds --force-state expanded --page builds
 
 echo "==> Log"
 /usr/bin/log show --last 3m --style compact \
