@@ -82,9 +82,8 @@ public enum MeetingActivity {
 
 /// The nudge that makes the notch grow shortly before a meeting ("Hey buddy, time to head over"). Pure.
 ///
-/// The value is equal across refreshes within a phase (before the start, after the start), so the banner is not
-/// re-rendered every minute. That includes the accessibility label, whose minute count is the lead rather than the
-/// time left: the live countdown in the banner carries the exact time.
+/// What is drawn is equal across refreshes within a phase (before the start, after the start). Only the accessibility
+/// label changes in between, with the minutes actually left, so it is right whenever VoiceOver reads it.
 public enum MeetingNudge: Sendable {
     /// Stable per meeting occurrence and start time: a meeting moved to another time nudges again.
     public static func id(for event: CalendarEvent) -> String {
@@ -101,18 +100,18 @@ public enum MeetingNudge: Sendable {
     }
 
     public static func make(candidates: [CalendarEvent], now: Date, lead: TimeInterval, answered: Set<String>) -> Nudge? {
-        event(candidates: candidates, now: now, lead: lead, answered: answered).map { make(for: $0, now: now, lead: lead) }
+        event(candidates: candidates, now: now, lead: lead, answered: answered).map { make(for: $0, now: now) }
     }
 
     /// The nudge for one event, whether or not it is in its window.
-    public static func make(for event: CalendarEvent, now: Date, lead: TimeInterval) -> Nudge {
+    public static func make(for event: CalendarEvent, now: Date) -> Nudge {
         let link = event.link
         let trimmed = event.title.trimmingCharacters(in: .whitespacesAndNewlines)
         let title = trimmed.isEmpty ? "Meeting" : trimmed
         let message: String, label: String
         if now < event.start {
-            let place = self.place(event.location)
-            let minutes = max(1, Int((lead / 60).rounded(.up)))
+            let place = self.place(event.location, provider: link?.provider)
+            let minutes = max(1, Int((event.start.timeIntervalSince(now) / 60).rounded(.up)))
             message = "Hey buddy, time to head " + (place.map { "to \($0)" } ?? "over")
             label = "\(title) starts in \(minutes) minute\(minutes == 1 ? "" : "s"). Time to head \(place.map { "to \($0)" } ?? "over")."
         } else {
@@ -133,8 +132,9 @@ public enum MeetingNudge: Sendable {
 
     /// The location as a place to head to, or `nil` when it is not one: empty, a link, or only the name of the
     /// online meeting service ("Microsoft Teams Meeting"). Uses the first non-empty line; Exchange's
-    /// "Room 4; Microsoft Teams Meeting" keeps only the room.
-    public static func place(_ location: String?) -> String? {
+    /// "Room 4; Microsoft Teams Meeting" keeps only the room. `provider` is the service the meeting's link is for:
+    /// a part that names it is not a place either, whatever else it says ("Microsoft Teams-möte" from a Swedish Outlook).
+    public static func place(_ location: String?, provider: MeetingProvider? = nil) -> String? {
         guard let line = location?
             .split(whereSeparator: \.isNewline)
             .map({ $0.trimmingCharacters(in: .whitespaces) })
@@ -142,7 +142,7 @@ public enum MeetingNudge: Sendable {
         else { return nil }
         let parts = line.split(separator: ";")
             .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty && MeetingLinkExtractor.urls(in: $0).isEmpty && !namesProvider($0) }
+            .filter { !$0.isEmpty && MeetingLinkExtractor.urls(in: $0).isEmpty && !namesProvider($0, linked: provider) }
         return parts.isEmpty ? nil : parts.joined(separator: "; ")
     }
 
@@ -151,9 +151,12 @@ public enum MeetingNudge: Sendable {
         MeetingProvider.allCases.flatMap { $0.label.lowercased().split(separator: " ").map(String.init) }
     ).union(["microsoft", "meeting", "online", "call", "video"])
 
-    private static func namesProvider(_ text: String) -> Bool {
-        let words = text.lowercased().split { !$0.isLetter && !$0.isNumber }
-        return !words.isEmpty && words.allSatisfy { providerWords.contains(String($0)) }
+    private static func namesProvider(_ text: String, linked: MeetingProvider?) -> Bool {
+        let words = Set(text.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init))
+        guard !words.isEmpty else { return false }
+        if words.isSubset(of: providerWords) { return true }
+        guard let linked else { return false }
+        return Set(linked.label.lowercased().split(separator: " ").map(String.init)).isSubset(of: words)
     }
 }
 

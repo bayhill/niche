@@ -39,8 +39,10 @@ public final class CalendarModule: NotchModule {
     @ObservationIgnored private var settings: SettingsStore?
     /// Overrides the `nudgeMinutes` setting (the sample uses it so its meeting 12 minutes away nudges).
     @ObservationIgnored private let nudgeLeadOverride: TimeInterval?
-    /// Nudge ids the user acted on or dismissed. In memory only; pruned to current candidates on every refresh.
-    @ObservationIgnored private(set) var answered: Set<String> = []
+    /// Nudge ids the user acted on or dismissed, with the instant each nudge would have expired. In memory only.
+    /// Pruned by that instant rather than by what the store currently returns, so a momentarily empty read
+    /// (EventKit resetting) cannot bring an answered nudge back.
+    @ObservationIgnored private(set) var answered: [String: Date] = [:]
     /// The event behind `nudge`, for its link.
     @ObservationIgnored private var nudgedEvent: CalendarEvent?
     @ObservationIgnored private var running = false
@@ -127,7 +129,7 @@ public final class CalendarModule: NotchModule {
     }
 
     private func answer(_ id: Nudge.ID) {
-        answered.insert(id)
+        answered[id] = nudge?.expiresAt ?? now()
         refresh()
     }
 
@@ -167,10 +169,10 @@ public final class CalendarModule: NotchModule {
         let activity = MeetingActivity.make(candidates: candidates, now: t, lead: lead)
         let imminent = next.map { $0.isNow || $0.event.start.timeIntervalSince(t) <= lead } ?? false
         let nudgeLead = nudgeLead
-        answered.formIntersection(candidates.map(MeetingNudge.id(for:)))
-        let nudged = MeetingNudge.event(candidates: candidates, now: t, lead: nudgeLead, answered: answered)
+        answered = answered.filter { $0.value > t }
+        let nudged = MeetingNudge.event(candidates: candidates, now: t, lead: nudgeLead, answered: Set(answered.keys))
         nudgedEvent = nudged
-        set(meeting: next, activity: activity, imminent: imminent, nudge: nudged.map { MeetingNudge.make(for: $0, now: t, lead: nudgeLead) })
+        set(meeting: next, activity: activity, imminent: imminent, nudge: nudged.map { MeetingNudge.make(for: $0, now: t) })
         if running { schedule(at: CalendarSchedule.nextRefresh(after: t, candidates: candidates, lead: lead, nudgeLead: nudgeLead)) }
     }
 

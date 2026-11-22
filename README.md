@@ -10,6 +10,7 @@ Glass.
 - **Clipboard** — recent text, links, images and colours. Off until switched on; kept in memory only.
 - **Now Playing** — title, artist, artwork and transport, also beside the closed notch.
 - **Next meeting** — from the calendars macOS knows about, with a Join button for Teams, Meet, Zoom and Webex links.
+  Five minutes before a meeting the notch grows and says so, until it is answered (the lead time is a setting, as is off).
 - **Claude Code sessions** — which sessions are running and which one is waiting.
 
 ## Requirements

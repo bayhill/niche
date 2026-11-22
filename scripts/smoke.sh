@@ -36,6 +36,7 @@ echo "==> States"
 capture closed --force-state closed
 capture activity --force-state activity
 capture hover --force-state hover
+capture nudge --force-state nudge
 capture drop --force-state drop
 capture home --force-state expanded
 capture shelf --force-state expanded --page shelf

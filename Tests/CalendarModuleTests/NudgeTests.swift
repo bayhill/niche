@@ -56,9 +56,12 @@ private func meeting(
         #expect(n.actionTitle == "Join")
         #expect(n.expiresAt == t0.addingTimeInterval(min(22)))
         #expect(n.accessibilityLabel == "Design review starts in 5 minutes. Time to head over.")
-        // Equal on every refresh before the start, label included.
-        #expect(nudge([review], at: 17.3) == n)
-        #expect(nudge([review], at: 19.99) == n)
+        // What is drawn is equal on every refresh before the start; only the label's minutes follow the clock.
+        var later = try #require(nudge([review], at: 17.3))
+        #expect(later.accessibilityLabel == "Design review starts in 3 minutes. Time to head over.")
+        later.accessibilityLabel = n.accessibilityLabel
+        #expect(later == n)
+        #expect(nudge([review], at: 19.99)?.accessibilityLabel == "Design review starts in 1 minute. Time to head over.")
     }
 
     @Test func afterTheStart() throws {
@@ -76,7 +79,9 @@ private func meeting(
     @Test func minutesInTheLabel() {
         #expect(nudge([review], at: 19.5, lead: 1)?.accessibilityLabel == "Design review starts in 1 minute. Time to head over.")
         #expect(nudge([review], at: 18.5, lead: 1.5)?.accessibilityLabel == "Design review starts in 2 minutes. Time to head over.")
-        #expect(nudge([review], at: 10, lead: 15)?.accessibilityLabel == "Design review starts in 15 minutes. Time to head over.")
+        // The minutes left, not the lead: a nudge that first shows late still tells the truth.
+        #expect(nudge([review], at: 10, lead: 15)?.accessibilityLabel == "Design review starts in 10 minutes. Time to head over.")
+        #expect(nudge([review], at: 18.2, lead: 15)?.accessibilityLabel == "Design review starts in 2 minutes. Time to head over.")
     }
 
     @Test func answeredIsSkipped() throws {
@@ -118,6 +123,20 @@ private func meeting(
         #expect(message("Meet at the reception") == "Hey buddy, time to head to Meet at the reception")
         let label = nudge([meeting("m", start: 20, location: "Room 4")], at: 15)?.accessibilityLabel
         #expect(label == "m starts in 5 minutes. Time to head to Room 4.")
+    }
+
+    @Test func locationNamingTheLinkedServiceIsNotAPlace() {
+        let teams = "https://teams.microsoft.com/l/meetup-join/19%3ameeting_abc%40thread.v2/0"
+        func message(_ location: String, notes: String?) -> String? {
+            nudge([meeting("m", start: 20, location: location, notes: notes)], at: 16)?.message
+        }
+        // A Swedish Outlook writes the service's name with a local word.
+        #expect(message("Microsoft Teams-möte", notes: teams) == "Hey buddy, time to head over")
+        #expect(message("Room 4; Microsoft Teams-möte", notes: teams) == "Hey buddy, time to head to Room 4")
+        #expect(message("Zoom-möte", notes: zoom) == "Hey buddy, time to head over")
+        // Without a link for that service the words are taken as a place.
+        #expect(message("Teams corner, floor 3", notes: nil) == "Hey buddy, time to head to Teams corner, floor 3")
+        #expect(message("Teams corner, floor 3", notes: zoom) == "Hey buddy, time to head to Teams corner, floor 3")
     }
 
     @Test func locationThatIsNotAPlace() {
@@ -195,7 +214,7 @@ private func meeting(
         let id = try #require(module.nudge?.id)
         module.dismissNudge(id)
         #expect(module.nudge == nil)
-        #expect(module.answered == [id])
+        #expect(Set(module.answered.keys) == [id])
         module.refresh()
         #expect(module.nudge == nil)
         clock.advance(minutes: 4.5) // after the start: same id, still answered
@@ -255,7 +274,7 @@ private func meeting(
         module.stop()
     }
 
-    @Test func answeredIsPrunedWhenTheMeetingIsGone() async throws {
+    @Test func answeredIsPrunedWhenTheNudgeWouldHaveExpired() async throws {
         let env = try TestEnvironment(); defer { env.cleanUp() }
         let clock = Clock(t0)
         let source = SampleEventSource(events: [meeting("short", start: 3, minutes: 10), meeting("later", start: 60)])
@@ -263,18 +282,33 @@ private func meeting(
         await module.start(env.context(for: .calendar))
         let id = try #require(module.nudge?.id)
         module.dismissNudge(id)
-        #expect(module.answered == [id])
-        clock.advance(minutes: 14) // "short" has ended
+        #expect(Set(module.answered.keys) == [id])
+        clock.advance(minutes: 4.9) // just inside "short"'s window (it ends two minutes after the start)
+        module.refresh()
+        #expect(Set(module.answered.keys) == [id])
+        clock.advance(minutes: 0.2)
         module.refresh()
         #expect(module.answered.isEmpty)
-        // A deleted meeting is pruned too.
-        clock.advance(minutes: 43)
-        module.refresh()
-        let later = try #require(module.nudge?.id)
-        module.dismissNudge(later)
+        module.stop()
+    }
+
+    @Test func anEmptyReadDoesNotBringADismissedNudgeBack() async throws {
+        let env = try TestEnvironment(); defer { env.cleanUp() }
+        let clock = Clock(t0)
+        let events = [meeting("review", start: 3)]
+        let source = SampleEventSource(events: events)
+        let module = make(source, clock: clock)
+        await module.start(env.context(for: .calendar))
+        let id = try #require(module.nudge?.id)
+        module.dismissNudge(id)
+        // The store momentarily returns nothing, then the same events again.
         source.events.removeAll()
         source.onChange?()
-        #expect(module.answered.isEmpty)
+        #expect(module.nudge == nil)
+        source.events = events
+        source.onChange?()
+        #expect(module.nudge == nil)
+        #expect(Set(module.answered.keys) == [id])
         module.stop()
     }
 
@@ -301,7 +335,7 @@ private func meeting(
         env.settings.set(CalendarModule.nudgeMinutes, 10)
         module.refresh()
         #expect(module.nudge != nil)
-        #expect(module.nudge?.accessibilityLabel == "review starts in 10 minutes. Time to head over.")
+        #expect(module.nudge?.accessibilityLabel == "review starts in 8 minutes. Time to head over.")
         env.settings.set(CalendarModule.nudgeMinutes, 0)
         module.refresh()
         #expect(module.nudge == nil)
