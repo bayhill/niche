@@ -1,5 +1,5 @@
 import Foundation
-import NotchCore
+@testable import NotchCore
 import NotchCoreTesting
 import Testing
 import UniformTypeIdentifiers
@@ -161,6 +161,22 @@ private func activity(_ id: String, _ p: LiveActivity.Priority, updated: TimeInt
             withObservationTracking { _ = store.get(Self.quality) } onChange: { changed() }
             store.set(Self.quality, 1)
         }
+    }
+
+    /// An ephemeral store holds no `UserDefaults` at all, so it cannot create a preferences file or a `cfprefsd`
+    /// domain. (Watching `~/Library/Preferences` instead would be unreliable: `cfprefsd` writes files later, and other
+    /// processes write there too.)
+    @Test func ephemeralStoresLiveInMemoryAndApartFromEachOther() {
+        let first = SettingsStore.ephemeral(), second = SettingsStore.ephemeral()
+        #expect(first.isInMemory && second.isInMemory)
+        #expect(!SettingsStore(defaults: .standard).isInMemory)
+        first.set(Self.quality, 12)
+        first.set(Self.options, Options(lossless: true))
+        #expect(first.get(Self.quality) == 12 && first.get(Self.options) == Options(lossless: true))
+        #expect(second.get(Self.quality) == 80, "stores share nothing")
+        first.reset(Self.options)
+        #expect(first.get(Self.options) == Options())
+        #expect(first.get(Self.quality) == 12)
     }
 }
 
@@ -364,6 +380,36 @@ private func activity(_ id: String, _ p: LiveActivity.Priority, updated: TimeInt
     @Test func stopsACommandThatRunsTooLong() async {
         let result = await ProcessCommandRunner().run(URL(fileURLWithPath: "/bin/sleep"), arguments: ["30"], timeout: .milliseconds(100))
         #expect(result.timedOut && !result.succeeded)
+    }
+
+    @Test func aGrandchildHoldingTheOutputDoesNotKeepTheCallerWaiting() async throws {
+        let started = ContinuousClock.now
+        // The shell prints the pid of a background sleep that inherits stdout, then waits for it.
+        let result = await ProcessCommandRunner().run(
+            URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", "sleep 30 & echo $!; wait"], timeout: .milliseconds(300)
+        )
+        let elapsed = ContinuousClock.now - started
+        let pid = try #require(pid_t(result.text.trimmingCharacters(in: .whitespacesAndNewlines)))
+        defer { kill(pid, SIGKILL) }
+        #expect(result.timedOut && !result.succeeded)
+        #expect(elapsed < .seconds(2))
+        #expect(kill(pid, 0) == 0, "the grandchild is still running, so the pipe was still held open")
+
+        kill(pid, SIGKILL)
+        var gone = false
+        for _ in 0..<100 where !gone {
+            gone = kill(pid, 0) == -1 && errno == ESRCH
+            if !gone { try await Task.sleep(for: .milliseconds(20)) }
+        }
+        #expect(gone, "the test leaves no sleep behind")
+    }
+
+    @Test func outputLargerThanAPipeIsReadInFull() async {
+        let result = await ProcessCommandRunner().run(
+            URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", "head -c 300000 /dev/zero; head -c 200000 /dev/zero >&2"],
+            timeout: .seconds(10)
+        )
+        #expect(result.succeeded && result.stdout.count == 300_000 && result.stderr.count == 200_000)
     }
 
     @Test func aMissingToolIsAResultNotACrash() async {

@@ -240,7 +240,7 @@ public struct HookInstaller: HookInstalling {
                 "Turn alerts off and remove \(paths.spool.path) (nothing more is collected)",
                 "Back up \(paths.claudeSettings.path) to \(paths.backups.path)",
                 "Run the two uninstall commands",
-                "Remove \(paths.installedPlugin.path)",
+                "Remove \(paths.installedPlugin.path), and all but the newest settings backup",
             ],
             settingsFile: paths.claudeSettings,
             settingsBefore: settings == nil && FileManager.default.fileExists(atPath: paths.claudeSettings.path)
@@ -328,7 +328,14 @@ public struct HookInstaller: HookInstalling {
             try? fm.removeItem(at: paths.installedPlugin)
             log.append("Removed \(paths.installedPlugin.path)")
         }
-        return InstallResult(succeeded: true, message: "Alerts are off and the plugin is removed from Claude Code.\(note)", log: log)
+        // Each backup is a copy of settings.json, which can hold tokens: once the plugin is gone, keep only the newest.
+        if fm.fileExists(atPath: paths.backups.path) {
+            pruneBackups(keeping: 1, newest: backup)
+            log.append("Kept only the newest settings.json backup in \(paths.backups.path)")
+        }
+        return InstallResult(
+            succeeded: true, message: "Alerts are off and the plugin is removed from Claude Code.\(backupNote(backup, kept: 1))", log: log
+        )
     }
 
     /// Refreshes the installed plugin copy from the app bundle when the plugin is registered and the copy differs.
@@ -374,7 +381,7 @@ public struct HookInstaller: HookInstalling {
         (settings?["enabledPlugins"] as? [String: Any])?[pluginID] as? Bool == true
     }
 
-    /// `claude plugin` reports an existing marketplace or install as already there (exit 0 in 2.1.330; older
+    /// `claude plugin` reports an existing marketplace or install as already there (exit 0 in recent versions; older
     /// versions may exit 1 with the same words).
     static func alreadyPresent(_ result: ProcessResult) -> Bool {
         let text = (result.stdout + result.stderr).lowercased()
@@ -382,9 +389,10 @@ public struct HookInstaller: HookInstalling {
             || text.contains("already added")
     }
 
-    private func backupNote(_ backup: URL?) -> String {
-        guard backup != nil else { return "" }
-        return " The previous settings.json is saved in \(paths.backups.path) (the last \(Self.backupsKept) are kept)."
+    private func backupNote(_ backup: URL?, kept: Int = backupsKept) -> String {
+        guard let backup else { return "" }
+        if kept == 1 { return " The previous settings.json is saved as \(backup.path) (older copies are deleted)." }
+        return " The previous settings.json is saved in \(paths.backups.path) (the last \(kept) are kept)."
     }
 
     static func declaresMarketplace(in settings: [String: Any]?) -> Bool {
@@ -414,15 +422,26 @@ public struct HookInstaller: HookInstalling {
             throw CocoaError(.fileWriteUnknown)
         }
         try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        pruneBackups(keeping: Self.backupsKept, newest: url)
+        return url
+    }
+
+    /// Deletes all but `count` settings backups: `newest` when given, then the most recently created others.
+    /// What is kept is made readable only by the user again.
+    func pruneBackups(keeping count: Int, newest: URL? = nil) {
+        let fm = FileManager.default
         let all = (try? fm.contentsOfDirectory(at: paths.backups, includingPropertiesForKeys: [.creationDateKey])) ?? []
-        let backups = all.filter { $0.lastPathComponent.hasPrefix("settings-") && $0.pathExtension == "json" }
+        var backups = all.filter { $0.lastPathComponent.hasPrefix("settings-") && $0.pathExtension == "json" }
             .sorted { a, b in
                 let da = (try? a.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast
                 let db = (try? b.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast
                 return da != db ? da > db : a.lastPathComponent > b.lastPathComponent
             }
-        for old in backups.dropFirst(Self.backupsKept) where old != url { try? fm.removeItem(at: old) }
-        return url
+        if let newest, let i = backups.firstIndex(where: { $0.lastPathComponent == newest.lastPathComponent }) {
+            backups.insert(backups.remove(at: i), at: 0)
+        }
+        for old in backups.dropFirst(count) { try? fm.removeItem(at: old) }
+        for kept in backups.prefix(count) { try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: kept.path) }
     }
 
     /// Replaces the installed copy with the bundle's, via a staging folder so a half-copied plugin is never live.

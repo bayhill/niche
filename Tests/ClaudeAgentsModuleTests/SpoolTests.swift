@@ -136,7 +136,32 @@ import Testing
         _ = try run(home: home, input: Fixture.hook("Notification", extra: #","notification_type":"permission_prompt","message":"Claude needs \"permission\"\nto use Bash","title":"Claude Code""#))
         let fields = try written(spool)
         #expect(fields["message"] as? String == "Claude needs \"permission\"\nto use Bash")
+        #expect(fields["title"] == nil, "the notification title is not read by the app")
         #expect(SpoolReader(directory: spool).drain().map(\.kind) == [.notification(type: "permission_prompt", message: "Claude needs \"permission\"\nto use Bash")])
+    }
+
+    /// Each event keeps only the fields the parser reads for it. A failed tool call's `error` can hold the command's
+    /// output, so `error` is kept for StopFailure alone.
+    @Test func eachEventKeepsOnlyItsOwnFields() throws {
+        let spare = #","tool_name":"Bash","error":"leaked-output","source":"resume","reason":"clear","notification_type":"idle_prompt","message":"hello","title":"Claude Code","session_title":"Tidy cart""#
+        let expected: [String: Set<String>] = [
+            "PostToolUseFailure": ["tool_name"], "PostToolUse": ["tool_name"], "PermissionRequest": ["tool_name"],
+            "Notification": ["notification_type", "message"], "SessionStart": ["source"], "SessionEnd": ["reason"],
+            "StopFailure": ["error"], "Stop": [], "UserPromptSubmit": [], "TaskCreated": [],
+        ]
+        for (event, own) in expected {
+            let (home, spool) = try makeSpool()
+            defer { try? FileManager.default.removeItem(at: home) }
+            let r = try run(home: home, input: Fixture.hook(event, extra: spare))
+            #expect(r.status == 0 && r.out.isEmpty && r.err.isEmpty)
+            let fields = try written(spool)
+            #expect(Set(fields.keys) == own.union(["session_id", "hook_event_name", "cwd", "session_title"]), "\(event)")
+            if event != "StopFailure" { #expect(fields["error"] == nil, "error is dropped for \(event)") }
+        }
+        let (home, spool) = try makeSpool()
+        defer { try? FileManager.default.removeItem(at: home) }
+        _ = try run(home: home, input: Fixture.hook("StopFailure", extra: #","error":"rate_limit""#))
+        #expect(SpoolReader(directory: spool).drain().map(\.kind) == [.stopFailure(error: "rate_limit")])
     }
 
     @Test func dropsToolContentAndCapsLongText() throws {

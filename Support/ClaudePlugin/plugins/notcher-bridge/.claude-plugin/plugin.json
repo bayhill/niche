@@ -1,7 +1,7 @@
 {
   "name": "notcher-bridge",
   "displayName": "Notcher bridge",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Hands each session event to the Notcher notch app so it can show which sessions need you. Does nothing unless Notcher's alerts are enabled.",
   "author": { "name": "Notcher" },
   "license": "MIT",

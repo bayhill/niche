@@ -114,6 +114,9 @@ import Testing
         let runner = RecordingRunner(settings: s.settings)
         let installer = s.installer(runner)
         _ = await installer.install()
+        try installer.backupSettings()
+        try installer.backupSettings()
+        let installed = try Data(contentsOf: s.settings)
         let result = await installer.uninstall()
         #expect(result.succeeded, "\(result.message) \(result.log)")
         let calls = await runner.calls
@@ -121,7 +124,12 @@ import Testing
         let fm = FileManager.default
         #expect(!fm.fileExists(atPath: s.paths.spool.path))
         #expect(!fm.fileExists(atPath: s.paths.installedPlugin.path))
-        #expect(try fm.contentsOfDirectory(atPath: s.paths.backups.path).count >= 1, "backups are kept")
+        let left = try fm.contentsOfDirectory(atPath: s.paths.backups.path)
+        #expect(left.count == 1, "only the newest backup is kept once the plugin is gone")
+        let kept = s.paths.backups.appending(path: try #require(left.first))
+        #expect(try Data(contentsOf: kept) == installed, "the copy taken just before the uninstall")
+        #expect(try fm.attributesOfItem(atPath: kept.path)[.posixPermissions] as? Int == 0o600)
+        #expect(result.message.contains(kept.path))
         #expect(installer.status() == .notInstalled)
         let settings = try s.settingsObject()
         #expect((settings["enabledPlugins"] as? [String: Any])?["notcher-bridge@notcher-local"] == nil)
@@ -197,6 +205,10 @@ import Testing
         let result = await installer.uninstall()
         #expect(!result.succeeded && result.message.contains("not found"))
         #expect(!FileManager.default.fileExists(atPath: s.paths.spool.path))
+        try installer.backupSettings()
+        _ = await installer.uninstall()
+        #expect(try FileManager.default.contentsOfDirectory(atPath: s.paths.backups.path).count == HookInstaller.backupsKept,
+                "a failed removal keeps the usual backups, for a retry or a restore")
     }
 
     @Test func prepareRefreshesAnOutdatedCopyOnlyWhenInstalled() async throws {

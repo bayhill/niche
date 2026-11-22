@@ -33,8 +33,9 @@ public struct HookEvent: Sendable, Equatable {
         self.sessionID = sessionID; self.kind = kind; self.at = at; self.cwd = cwd; self.title = title
     }
 
-    /// Parses a hook's stdin JSON. Falls back to scanning the text for the leading common fields when the JSON is
-    /// cut short (the bridge keeps only the first 64 KiB). `nil` without a session id and event name.
+    /// Parses a hook event: the reduced JSON the bridge writes, or a hook's full stdin JSON. Falls back to scanning
+    /// the text for the known fields when the JSON does not parse, such as a damaged or cut-short file (the bridge
+    /// itself always writes complete JSON, at most 200 characters per field). `nil` without a session id and event name.
     public static func parse(_ data: Data, at: Date) -> HookEvent? {
         var fields: [String: Any]
         if let object = try? JSONSerialization.jsonObject(with: data), let json = object as? [String: Any] {

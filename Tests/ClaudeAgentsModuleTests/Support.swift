@@ -42,14 +42,15 @@ actor RecordingRunner: ProcessRunning {
 enum Fixture {
     static let t0 = Date(timeIntervalSince1970: 1_800_000_000)
 
-    /// Sanitised from real `~/.claude/sessions/*.json` files (Claude Code 2.1.318–2.1.330).
-    static let busyAuto = #"{"pid":4242,"sessionId":"11111111-aaaa-4bbb-8ccc-000000000001","cwd":"/Users/dev/projects/demo","startedAt":1795280402474,"procStart":"Sat Nov 21 16:59:57 2026","version":"2.1.330","peerProtocol":1,"peerFeatures":["notify_idle","reply_across_default_dirs","artifact_yield"],"kind":"interactive","entrypoint":"cli","pidDomain":"darwin","asksForConvertedSkills":false,"messagingSocketPath":"/tmp/cc-socks/4242.sock","name":"build-demo-app","nameSource":"auto","nameSince":1795283523654,"status":"busy","updatedAt":1795283523654,"statusUpdatedAt":1795283522055}"#
-    static let idleDerived = #"{"pid":4343,"sessionId":"11111111-aaaa-4bbb-8ccc-000000000002","cwd":"/Users/dev/projects/Shop.Web","startedAt":1795160784184,"procStart":"Fri Nov 20 07:46:19 2026","version":"2.1.329","kind":"interactive","entrypoint":"cli","pidDomain":"darwin","name":"shop-web-85","nameSource":"derived","nameSince":1795160784184,"status":"idle","updatedAt":1795283720896,"statusUpdatedAt":1795283720896}"#
-    static let shell = #"{"pid":4444,"sessionId":"11111111-aaaa-4bbb-8ccc-000000000003","cwd":"/Users/dev/projects/gui","startedAt":1795192489143,"procStart":"Fri Nov 20 16:34:43 2026","version":"2.1.329","kind":"interactive","entrypoint":"cli","name":"gui-8f","nameSource":"derived","status":"shell","updatedAt":1795280066430,"statusUpdatedAt":1795280066430}"#
-    static let vscode = #"{"pid":4545,"sessionId":"11111111-aaaa-4bbb-8ccc-000000000004","cwd":"/Users/dev","startedAt":1793868289263,"procStart":"Thu Nov  5 08:44:46 2026","version":"2.1.318","kind":"interactive","entrypoint":"claude-vscode","pidDomain":"darwin","name":"dev-e0","nameSource":"derived","nameSince":1793868289263,"updatedAt":1793868289335,"status":"idle","statusUpdatedAt":1793868289335}"#
+    /// Invented session files in the shape of `~/.claude/sessions/<pid>.json`, holding only fields the parser reads.
+    static let busyAuto = #"{"pid":4242,"sessionId":"11111111-aaaa-4bbb-8ccc-000000000001","cwd":"/Users/dev/projects/demo","startedAt":1795000003250,"procStart":"Wed Nov 18 11:06:40 2026","version":"9.1.2","kind":"interactive","entrypoint":"cli","name":"build-demo-app","nameSource":"auto","status":"busy","updatedAt":1795003600000,"statusUpdatedAt":1795003598500}"#
+    static let idleDerived = #"{"pid":4343,"sessionId":"11111111-aaaa-4bbb-8ccc-000000000002","cwd":"/Users/dev/projects/Garden.Web","startedAt":1795100002000,"procStart":"Thu Nov 19 14:53:20 2026","version":"9.1.1","kind":"interactive","entrypoint":"cli","name":"garden-web-85","nameSource":"derived","status":"idle","updatedAt":1795103000000,"statusUpdatedAt":1795103000000}"#
+    static let shell = #"{"pid":4444,"sessionId":"11111111-aaaa-4bbb-8ccc-000000000003","cwd":"/Users/dev/projects/gui","startedAt":1795200001500,"procStart":"Fri Nov 20 18:40:00 2026","version":"9.1.1","kind":"interactive","entrypoint":"cli","name":"gui-8f","nameSource":"derived","status":"shell","updatedAt":1795201000000,"statusUpdatedAt":1795201000000}"#
+    static let vscode = #"{"pid":4545,"sessionId":"11111111-aaaa-4bbb-8ccc-000000000004","cwd":"/Users/dev","startedAt":1794000002100,"procStart":"Fri Nov  6 21:20:00 2026","version":"9.0.7","kind":"interactive","entrypoint":"claude-vscode","name":"dev-e0","nameSource":"derived","status":"idle","updatedAt":1794000002200,"statusUpdatedAt":1794000002200}"#
 
+    /// A hook's stdin with the fields the parser reads; `extra` is spliced in after the event name.
     static func hook(_ name: String, session: String = "s1", extra: String = "") -> Data {
-        Data(#"{"session_id":"\#(session)","transcript_path":"/Users/dev/.claude/projects/x/\#(session).jsonl","cwd":"/Users/dev/projects/demo","permission_mode":"default","hook_event_name":"\#(name)"\#(extra)}"#.utf8)
+        Data(#"{"session_id":"\#(session)","cwd":"/Users/dev/projects/demo","hook_event_name":"\#(name)"\#(extra)}"#.utf8)
     }
 
     static func event(_ kind: HookEvent.Kind, _ session: String = "s1", at offset: TimeInterval, cwd: String? = "/Users/dev/projects/demo") -> HookEvent {

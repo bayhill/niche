@@ -15,37 +15,64 @@ public struct SettingsKey<Value: Codable & Sendable>: Sendable {
 @MainActor
 @Observable
 public final class SettingsStore {
-    @ObservationIgnored private let defaults: UserDefaults
+    /// Where the JSON for each key lives.
+    private enum Storage {
+        case defaults(UserDefaults)
+        /// Process memory only: nothing on disk and nothing registered with `cfprefsd`.
+        case memory
+    }
+
+    @ObservationIgnored private let storage: Storage
+    @ObservationIgnored private var memory: [String: Data] = [:]
     @ObservationIgnored private let encoder = JSONEncoder()
     @ObservationIgnored private let decoder = JSONDecoder()
     private var revision = 0
 
-    public init(defaults: UserDefaults = .standard) { self.defaults = defaults }
+    public init(defaults: UserDefaults = .standard) { storage = .defaults(defaults) }
 
-    /// A store backed by a throwaway suite, for tests and previews.
-    public static func ephemeral() -> SettingsStore {
-        let suite = "notcher.ephemeral.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defaults.removePersistentDomain(forName: suite)
-        return SettingsStore(defaults: defaults)
+    private init(storage: Storage) { self.storage = storage }
+
+    /// A store that lives in memory and is gone with it, for tests, previews and fixtures.
+    public static func ephemeral() -> SettingsStore { SettingsStore(storage: .memory) }
+
+    /// Whether the store keeps its values in memory only.
+    var isInMemory: Bool {
+        if case .memory = storage { return true }
+        return false
     }
 
     public func get<Value>(_ key: SettingsKey<Value>) -> Value {
         _ = revision
-        guard let data = defaults.data(forKey: key.name), let value = try? decoder.decode(Value.self, from: data) else {
+        guard let data = data(forKey: key.name), let value = try? decoder.decode(Value.self, from: data) else {
             return key.defaultValue
         }
         return value
     }
 
     public func set<Value>(_ key: SettingsKey<Value>, _ value: Value) {
-        if let data = try? encoder.encode(value) { defaults.set(data, forKey: key.name) }
+        if let data = try? encoder.encode(value) { store(data, forKey: key.name) }
         revision &+= 1
     }
 
     public func reset<Value>(_ key: SettingsKey<Value>) {
-        defaults.removeObject(forKey: key.name)
+        store(nil, forKey: key.name)
         revision &+= 1
+    }
+
+    private func data(forKey name: String) -> Data? {
+        switch storage {
+        case .defaults(let defaults): defaults.data(forKey: name)
+        case .memory: memory[name]
+        }
+    }
+
+    private func store(_ data: Data?, forKey name: String) {
+        switch storage {
+        case .defaults(let defaults):
+            if let data { defaults.set(data, forKey: name) } else { defaults.removeObject(forKey: name) }
+        case .memory:
+            memory[name] = data
+        }
     }
 
     /// Two-way binding for SwiftUI controls.

@@ -3,16 +3,16 @@ import Testing
 @testable import ClaudeAgentsModule
 
 @Suite struct RegistryParsingTests {
-    @Test func parsesSanitisedRealSamples() throws {
+    @Test func parsesSessionFiles() throws {
         let busy = try #require(RegistryRecord.parse(Data(Fixture.busyAuto.utf8), fileName: "4242.json"))
         #expect(busy.pid == 4242)
         #expect(busy.sessionID == "11111111-aaaa-4bbb-8ccc-000000000001")
         #expect(busy.cwd == "/Users/dev/projects/demo")
         #expect(busy.name == "build-demo-app" && busy.nameSource == "auto")
-        #expect(busy.status == "busy" && busy.entrypoint == "cli" && busy.kind == "interactive" && busy.version == "2.1.330")
-        #expect(busy.statusUpdatedAt == Date(timeIntervalSince1970: 1_795_283_522.055))
-        #expect(busy.startedAt == Date(timeIntervalSince1970: 1_795_280_402.474))
-        #expect(busy.procStart == "Sat Nov 21 16:59:57 2026")
+        #expect(busy.status == "busy" && busy.entrypoint == "cli" && busy.kind == "interactive" && busy.version == "9.1.2")
+        #expect(busy.statusUpdatedAt == Date(timeIntervalSince1970: 1_795_003_598.5))
+        #expect(busy.startedAt == Date(timeIntervalSince1970: 1_795_000_003.25))
+        #expect(busy.procStart == "Wed Nov 18 11:06:40 2026")
 
         let idle = try #require(RegistryRecord.parse(Data(Fixture.idleDerived.utf8)))
         #expect(idle.status == "idle" && idle.nameSource == "derived")
@@ -33,10 +33,10 @@ import Testing
     @Test func toleratesMissingAndOddFields() throws {
         let fromName = try #require(RegistryRecord.parse(Data(#"{"status":"idle"}"#.utf8), fileName: "777.json"))
         #expect(fromName.pid == 777 && fromName.sessionID == "pid:777")
-        let strings = try #require(RegistryRecord.parse(Data(#"{"pid":"12","sessionId":"x","startedAt":"1795280402474","updatedAt":1795280402,"statusUpdatedAt":"2026-11-21T17:00:00Z","name":42}"#.utf8)))
+        let strings = try #require(RegistryRecord.parse(Data(#"{"pid":"12","sessionId":"x","startedAt":"1795000003250","updatedAt":1795000003,"statusUpdatedAt":"2026-11-18T12:00:00Z","name":42}"#.utf8)))
         #expect(strings.pid == 12)
-        #expect(strings.startedAt == Date(timeIntervalSince1970: 1_795_280_402.474))
-        #expect(strings.updatedAt == Date(timeIntervalSince1970: 1_795_280_402), "seconds are accepted too")
+        #expect(strings.startedAt == Date(timeIntervalSince1970: 1_795_000_003.25))
+        #expect(strings.updatedAt == Date(timeIntervalSince1970: 1_795_000_003), "seconds are accepted too")
         #expect(strings.statusUpdatedAt != nil)
         #expect(strings.name == "42")
     }

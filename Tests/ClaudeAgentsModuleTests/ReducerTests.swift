@@ -139,13 +139,13 @@ import Testing
         var r = SessionReducer()
         r.applyRegistry(snap(
             Fixture.record("a", pid: 1, status: "busy", at: 0, name: "build-demo-app", nameSource: "auto"),
-            Fixture.record("b", pid: 2, status: "idle", at: -60, name: "shop-web-85", nameSource: "derived", cwd: "/Users/dev/projects/Shop.Web"),
+            Fixture.record("b", pid: 2, status: "idle", at: -60, name: "garden-web-85", nameSource: "derived", cwd: "/Users/dev/projects/Garden.Web"),
             Fixture.record("c", pid: 3, status: "shell", at: -30, name: nil, nameSource: nil, cwd: "/Users/dev/projects/gui"),
             Fixture.record("d", pid: 4, status: "waiting", at: -5, waitingFor: "permission prompt")
         ))
         let s = r.sessions(now: at(1))
         #expect(s.map(\.id) == ["d", "a", "c", "b"], "needs the user first, then working, then idle (newest first)")
-        #expect(s.map(\.title) == ["demo-task", "build-demo-app", "gui", "Shop.Web"], "derived names fall back to the folder")
+        #expect(s.map(\.title) == ["demo-task", "build-demo-app", "gui", "Garden.Web"], "derived names fall back to the folder")
         #expect(s[0].state == .needsPermission(detail: nil) && s[0].pid == 4)
         #expect(s[1].state == .working)
         #expect(s[2].state == .idle(since: at(-30)))

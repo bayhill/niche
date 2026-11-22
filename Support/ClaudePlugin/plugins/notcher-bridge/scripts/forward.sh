@@ -1,10 +1,14 @@
 #!/bin/bash
 # Notcher bridge: hands one Claude Code hook event (JSON on stdin) to the Notcher app.
 #
-# Privacy: only a handful of short fields are written to disk (session id, cwd, event name, tool name, notification
-# type/title/message, start source, end reason, error, session title), each cut to 200 characters. Prompts, tool
-# input and tool output are never written. The JSON is read with /usr/bin/plutil (ships with macOS), held in memory,
-# and the reduced event is built as a property list and converted to JSON by plutil, so escaping is always valid.
+# Privacy: only the fields Notcher reads are written to disk, each cut to 200 characters:
+#   every event:                                  session_id, hook_event_name, cwd, session_title
+#   PermissionRequest, PostToolUse(Failure):      tool_name
+#   Notification:                                 notification_type, message
+#   SessionStart: source    SessionEnd: reason    StopFailure: error
+# Prompts, tool input and tool output are never written (a failed tool call's `error` can hold its output, so `error`
+# is kept for StopFailure alone). The JSON is read with /usr/bin/plutil (ships with macOS), held in memory, and the
+# reduced event is built as a property list and converted to JSON by plutil, so escaping is always valid.
 #
 # Prints nothing, always exits 0, never interprets stdin as code. Does nothing unless Notcher's spool folder exists
 # (Notcher running with alerts on), and nothing when the folder already holds more than 50 events (not drained).
@@ -33,7 +37,15 @@ event="$(field hook_event_name)"
 umask 077
 tmp="$(mktemp "$spool/.event.XXXXXX")" || exit 0
 "$plutil" -create xml1 "$tmp" || { rm -f "$tmp"; exit 0; }
-for key in session_id hook_event_name cwd tool_name notification_type title message source reason error session_title; do
+keys="session_id hook_event_name cwd session_title"
+case "$event" in
+  PermissionRequest | PostToolUse | PostToolUseFailure) keys="$keys tool_name" ;;
+  Notification) keys="$keys notification_type message" ;;
+  SessionStart) keys="$keys source" ;;
+  SessionEnd) keys="$keys reason" ;;
+  StopFailure) keys="$keys error" ;;
+esac
+for key in $keys; do
   value="$(field "$key")"
   [ -n "$value" ] || continue
   value="${value:0:200}"

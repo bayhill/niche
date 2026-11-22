@@ -46,23 +46,23 @@ public struct RegistryRecord: Sendable, Equatable {
     public var sessionID: String
     public var cwd: String?
     public var name: String?
-    /// Observed: `auto` (generated from the task), `derived` (cwd slug), `user`, `peer`.
+    /// Seen in session files: `auto` (generated from the task), `derived` (cwd slug), `user`, `peer`.
     public var nameSource: String?
-    /// Observed: `busy`, `idle`, `shell`. The 2.1.330 binary also writes `waiting` (with `waitingFor`).
+    /// Seen in session files: `busy`, `idle`, `shell`. `waiting` and `blocked`, with `waitingFor`, are handled too.
     public var status: String?
-    /// Observed in the binary: "permission prompt", "dialog open", "input needed", "sandbox request", ...
+    /// Why a `waiting` session waits, as short text such as "permission prompt" or "input needed".
     public var waitingFor: String?
     public var statusUpdatedAt: Date?
     public var updatedAt: Date?
     public var startedAt: Date?
-    /// `ps -o lstart` style text, e.g. "Sat Nov 21 16:59:57 2026" (observed in UTC).
+    /// `ps -o lstart` style text, e.g. "Wed Nov 18 11:06:40 2026" (UTC in the files seen so far).
     public var procStart: String?
     public var kind: String?
     public var entrypoint: String?
     public var version: String?
     /// A pre-warmed process that no user session has claimed yet.
     public var spare: Bool
-    /// Written by Claude's background-agent classifier: `tempo` "blocked" plus a `needs` sentence.
+    /// Present in some session files: `tempo` "blocked" plus a `needs` sentence saying what the session waits for.
     public var tempo: String?
     public var needs: String?
 
