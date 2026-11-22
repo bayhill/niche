@@ -111,7 +111,7 @@ public final class ConvertModule: NotchModule, ImageConverting {
     @ObservationIgnored private var injectedSettings: SettingsStore?
     @ObservationIgnored private let injectedFallback: URL?
     @ObservationIgnored private let now: @MainActor () -> Date
-    @ObservationIgnored private let sleep: @Sendable (Duration) async -> Void
+    @ObservationIgnored private let sleep: (@Sendable (Duration) async -> Void)?
     @ObservationIgnored private let thumbnailer: @Sendable (URL) async -> SendableImage?
     @ObservationIgnored private let reveal: @MainActor (URL) -> Void
     @ObservationIgnored private let haptic: @MainActor () -> Void
@@ -137,7 +137,7 @@ public final class ConvertModule: NotchModule, ImageConverting {
         settings: SettingsStore? = nil,
         fallbackDirectory: URL? = nil,
         now: @escaping @MainActor () -> Date = { Date() },
-        sleep: @escaping @Sendable (Duration) async -> Void = { try? await Task.sleep(for: $0) },
+        sleep: (@Sendable (Duration) async -> Void)? = nil,
         thumbnailer: @escaping @Sendable (URL) async -> SendableImage? = ConvertModule.makeThumbnail,
         reveal: @escaping @MainActor (URL) -> Void = { NSWorkspace.shared.activateFileViewerSelecting([$0]) },
         haptic: @escaping @MainActor () -> Void = { Haptics.success() },
@@ -430,7 +430,7 @@ public final class ConvertModule: NotchModule, ImageConverting {
         expiryTask?.cancel()
         let sleep = self.sleep
         expiryTask = Task { [weak self] in
-            await sleep(.seconds(Self.summaryDuration))
+            await RealClock.sleepUnlessCancelled(.seconds(Self.summaryDuration), using: sleep)
             guard !Task.isCancelled, let self, self.batch?.id == batchID, self.batch?.isRunning == false else { return }
             Motion.animate(Motion.morph) {
                 self.batch = nil

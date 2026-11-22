@@ -107,7 +107,7 @@ public final class NowPlayingModule: NotchModule, PlaybackControlling {
     @ObservationIgnored private let adapterSelfTest: @Sendable () async -> AdapterTestOutcome
     @ObservationIgnored private let selfTestKey: String?
     @ObservationIgnored private let verifyAfter: Duration
-    @ObservationIgnored private let sleep: @Sendable (Duration) async throws -> Void
+    @ObservationIgnored private let sleep: (@Sendable (Duration) async throws -> Void)?
     @ObservationIgnored private var retriedAfterGiveUp = false
     /// The stream started without a cached pass; it is confirmed by a real track or, failing that, by the self-test.
     @ObservationIgnored private var verifying = false
@@ -132,7 +132,7 @@ public final class NowPlayingModule: NotchModule, PlaybackControlling {
         adapter: (any NowPlayingProvider)?, adapterSelfTest: @escaping @Sendable () async -> AdapterTestOutcome,
         selfTestKey: String? = nil, verifyAfter: Duration = .seconds(15), fallback: (any NowPlayingProvider)?,
         now: @escaping @MainActor () -> Date = { .now },
-        sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
+        sleep: (@Sendable (Duration) async throws -> Void)? = nil,
         opener: SourceAppOpener = .inert
     ) {
         self.adapter = adapter; self.adapterSelfTest = adapterSelfTest; self.selfTestKey = selfTestKey
@@ -221,15 +221,21 @@ public final class NowPlayingModule: NotchModule, PlaybackControlling {
         selection?.cancel()
         let sleep = sleep, delay = verifyAfter
         selection = Task { [weak self] in
-            do { try await sleep(delay) } catch { return }
-            guard !Task.isCancelled, let self, self.verifying else { return }
-            self.runSelfTest { [weak self] outcome in
-                guard let self, self.verifying else { return }
-                self.verifying = false
-                if outcome == .failed {
-                    self.log.error("adapter self-test failed; leaving the stream")
-                    self.select(adapterPassed: false)
-                }
+            try? await RealClock.sleep(delay, using: sleep)
+            guard !Task.isCancelled else { return }
+            self?.verificationIsDue()
+        }
+    }
+
+    /// The stream stayed silent for `verifyAfter`: run the self-test and leave the stream if it fails.
+    private func verificationIsDue() {
+        guard verifying else { return }
+        runSelfTest { [weak self] outcome in
+            guard let self, self.verifying else { return }
+            self.verifying = false
+            if outcome == .failed {
+                self.log.error("adapter self-test failed; leaving the stream")
+                self.select(adapterPassed: false)
             }
         }
     }

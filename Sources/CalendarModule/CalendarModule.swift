@@ -36,7 +36,7 @@ public final class CalendarModule: NotchModule {
 
     @ObservationIgnored private let source: any EventSource
     @ObservationIgnored private let now: @MainActor () -> Date
-    @ObservationIgnored private let sleep: @Sendable (Duration) async throws -> Void
+    @ObservationIgnored private let sleep: (@Sendable (Duration) async throws -> Void)?
     @ObservationIgnored private let openURL: @MainActor (URL) -> Void
     /// Whether an app is installed for a meeting's app link (`MeetingLink.appURL`).
     @ObservationIgnored private let canOpenInApp: @MainActor (URL) -> Bool
@@ -59,7 +59,7 @@ public final class CalendarModule: NotchModule {
 
     public init(
         source: any EventSource, now: @escaping @MainActor () -> Date = { .now },
-        sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
+        sleep: (@Sendable (Duration) async throws -> Void)? = nil,
         openURL: @escaping @MainActor (URL) -> Void = { NSWorkspace.shared.open($0) },
         canOpenInApp: @escaping @MainActor (URL) -> Bool = { _ in false },
         settings: SettingsStore? = nil, nudgeLead: TimeInterval? = nil
@@ -209,7 +209,7 @@ public final class CalendarModule: NotchModule {
         let delay = max(0.25, date.timeIntervalSince(now()))
         let sleep = sleep
         timer = Task { [weak self] in
-            do { try await sleep(.milliseconds(Int(delay * 1000))) } catch { return }
+            do { try await RealClock.sleep(.milliseconds(Int(delay * 1000)), using: sleep) } catch { return }
             guard !Task.isCancelled else { return }
             self?.refresh()
         }

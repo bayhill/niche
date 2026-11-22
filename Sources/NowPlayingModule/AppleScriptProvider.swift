@@ -104,7 +104,7 @@ public final class AppleScriptProvider: NowPlayingProvider {
     private let loadArtwork: @Sendable (URL) async -> SendableImage?
     private let schedule: PollSchedule
     private let observeApps: Bool
-    private let sleep: @Sendable (Duration) async throws -> Void
+    private let sleep: (@Sendable (Duration) async throws -> Void)?
     private let now: @MainActor () -> Date
     private var task: Task<Void, Never>?
     private var last: NowPlayingState?
@@ -121,7 +121,7 @@ public final class AppleScriptProvider: NowPlayingProvider {
         loadArtwork: @escaping @Sendable (URL) async -> SendableImage? = AppleScriptProvider.downloadArtwork,
         schedule: PollSchedule = PollSchedule(),
         observeApps: Bool = true,
-        sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
+        sleep: (@Sendable (Duration) async throws -> Void)? = nil,
         now: @escaping @MainActor () -> Date = { .now }
     ) {
         self.runner = runner; self.runningPlayers = runningPlayers; self.loadArtwork = loadArtwork
@@ -174,7 +174,7 @@ public final class AppleScriptProvider: NowPlayingProvider {
             while !Task.isCancelled, let self {
                 let wait = await self.poll()
                 guard !Task.isCancelled else { return }
-                do { try await self.sleep(wait) } catch { return }
+                do { try await RealClock.sleep(wait, using: self.sleep) } catch { return }
             }
         }
     }

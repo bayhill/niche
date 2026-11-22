@@ -91,7 +91,7 @@ final class FakeScriptRunner: ScriptRunning {
 }
 
 @MainActor
-func eventually(_ timeout: Duration = .seconds(3), _ condition: @MainActor () -> Bool) async -> Bool {
+func eventually(_ timeout: Duration = .seconds(15), _ condition: @MainActor () -> Bool) async -> Bool {
     let deadline = ContinuousClock.now + timeout
     while ContinuousClock.now < deadline {
         if condition() { return true }

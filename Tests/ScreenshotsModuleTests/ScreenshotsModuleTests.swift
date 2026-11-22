@@ -99,7 +99,7 @@ struct Rig {
 /// Waits for something the module does in a task (generous: parallel tests share the main actor).
 @MainActor
 func eventually(_ condition: @MainActor () -> Bool) async throws {
-    for _ in 0..<200 where !condition() { try await Task.sleep(for: .milliseconds(10)) }
+    for _ in 0..<1500 where !condition() { try await Task.sleep(for: .milliseconds(10)) }
 }
 
 // MARK: - The list

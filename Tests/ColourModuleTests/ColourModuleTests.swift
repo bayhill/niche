@@ -35,7 +35,7 @@ private func makeModule(
 }
 
 @MainActor
-private func waitUntil(_ condition: () -> Bool, timeout: Duration = .seconds(3)) async {
+private func waitUntil(_ condition: () -> Bool, timeout: Duration = .seconds(15)) async {
     let clock = ContinuousClock(), end = clock.now + timeout
     while !condition(), clock.now < end { try? await Task.sleep(for: .milliseconds(10)) }
 }

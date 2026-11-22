@@ -89,7 +89,7 @@ public final class BuildsModule: NotchModule {
     @ObservationIgnored private let isExecutable: @Sendable (String) -> Bool
     @ObservationIgnored private let environment: [String: String]
     @ObservationIgnored private let now: @MainActor () -> Date
-    @ObservationIgnored private let sleep: @Sendable (Duration) async throws -> Void
+    @ObservationIgnored private let sleep: (@Sendable (Duration) async throws -> Void)?
     @ObservationIgnored private let openURL: @MainActor (URL) -> Void
     @ObservationIgnored private let chooseFolder: @MainActor () async -> URL?
     @ObservationIgnored private let activeInterval: Duration
@@ -126,7 +126,7 @@ public final class BuildsModule: NotchModule {
         isExecutable: @escaping @Sendable (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) },
         environment: [String: String] = ProcessInfo.processInfo.environment,
         now: @escaping @MainActor () -> Date = { Date() },
-        sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
+        sleep: (@Sendable (Duration) async throws -> Void)? = nil,
         openURL: @escaping @MainActor (URL) -> Void = { NSWorkspace.shared.open($0) },
         chooseFolder: @escaping @MainActor () async -> URL? = BuildsModule.chooseFolderWithPanel,
         activeInterval: Duration = .seconds(60),
@@ -148,7 +148,7 @@ public final class BuildsModule: NotchModule {
         isExecutable = { _ in false }
         environment = [:]
         self.now = { Date() }
-        sleep = { try await Task.sleep(for: $0) }
+        sleep = nil
         openURL = { _ in }
         chooseFolder = { nil }
         activeInterval = .seconds(60); idleInterval = .seconds(300); staleAfter = 30; activityDuration = .seconds(8)
@@ -224,7 +224,7 @@ public final class BuildsModule: NotchModule {
             var wait: Duration?
             while !Task.isCancelled {
                 if let wait {
-                    do { try await sleep(wait) } catch { return }
+                    do { try await RealClock.sleep(wait, using: sleep) } catch { return }
                 }
                 guard let self, !Task.isCancelled else { return }
                 await self.refresh()

@@ -117,12 +117,14 @@ final class FoundationChildProcess: ChildProcess {
     /// Waits until stderr has been read to its end, but no longer than `limit` (a grandchild may keep it open).
     func waitForStderr(atMost limit: Duration) async {
         let end = stderrEnd
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask { for await _ in end {} }
-            group.addTask { try? await Task.sleep(for: limit) }
-            await group.next()
-            group.cancelAll()
+        // Two plain tasks, not a task group: iterating the stream stops when its task is cancelled.
+        let reading = Task { for await _ in end {} }
+        let deadline = Task {
+            try? await Task.sleep(for: limit)
+            reading.cancel()
         }
+        await reading.value
+        deadline.cancel()
     }
 
     func waitForExit() async -> Int32 {

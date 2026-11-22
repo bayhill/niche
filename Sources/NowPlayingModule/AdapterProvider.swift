@@ -55,7 +55,7 @@ public final class AdapterProvider: NowPlayingProvider {
     private let locations: AdapterLocations
     private let launcher: any ProcessLaunching
     private let backoff: RestartBackoff
-    private let sleep: @Sendable (Duration) async throws -> Void
+    private let sleep: (@Sendable (Duration) async throws -> Void)?
     private let log: Logger
     private var task: Task<Void, Never>?
     private var terminationObserver: (any NSObjectProtocol)?
@@ -67,7 +67,7 @@ public final class AdapterProvider: NowPlayingProvider {
     public init(
         locations: AdapterLocations, launcher: any ProcessLaunching = FoundationProcessLauncher(),
         backoff: RestartBackoff = RestartBackoff(),
-        sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
+        sleep: (@Sendable (Duration) async throws -> Void)? = nil,
         log: Logger = Log.logger(for: .nowPlaying)
     ) {
         self.locations = locations; self.launcher = launcher; self.backoff = backoff; self.sleep = sleep; self.log = log
@@ -121,7 +121,7 @@ public final class AdapterProvider: NowPlayingProvider {
     /// Cancelling the calling task terminates the child immediately.
     nonisolated static func supervise(
         launcher: any ProcessLaunching, executable: URL, arguments: [String], backoff: RestartBackoff,
-        sleep: @Sendable (Duration) async throws -> Void, log: Logger, emit: @Sendable (StreamEvent) async -> Void
+        sleep: (@Sendable (Duration) async throws -> Void)?, log: Logger, emit: @Sendable (StreamEvent) async -> Void
     ) async {
         var backoff = backoff
         var parser = AdapterStreamParser()
@@ -152,7 +152,7 @@ public final class AdapterProvider: NowPlayingProvider {
                 await emit(.gaveUp)
                 return
             }
-            do { try await sleep(delay) } catch { return }
+            do { try await RealClock.sleep(delay, using: sleep) } catch { return }
         }
     }
 

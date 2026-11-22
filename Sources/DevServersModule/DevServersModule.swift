@@ -71,7 +71,7 @@ public final class DevServersModule: NotchModule {
     @ObservationIgnored private let openURL: @MainActor (URL) -> Void
     @ObservationIgnored private let copyText: @MainActor (String) -> Void
     @ObservationIgnored private let signal: @MainActor (Int32) -> Bool
-    @ObservationIgnored private let sleep: @Sendable (Duration) async throws -> Void
+    @ObservationIgnored private let sleep: (@Sendable (Duration) async throws -> Void)?
     @ObservationIgnored private let refreshInterval: Duration
     @ObservationIgnored private let followUpInterval: Duration
     @ObservationIgnored private let followUps: Int
@@ -102,7 +102,7 @@ public final class DevServersModule: NotchModule {
         open: @escaping @MainActor (URL) -> Void,
         copy: @escaping @MainActor (String) -> Void,
         signal: @escaping @MainActor (Int32) -> Bool,
-        sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
+        sleep: (@Sendable (Duration) async throws -> Void)? = nil,
         refreshInterval: Duration = .seconds(3),
         followUpInterval: Duration = .milliseconds(500),
         followUps: Int = 6,
@@ -205,7 +205,7 @@ public final class DevServersModule: NotchModule {
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.refresh()
-                do { try await sleep(interval) } catch { return }
+                do { try await RealClock.sleep(interval, using: sleep) } catch { return }
             }
         }
     }
@@ -293,7 +293,7 @@ public final class DevServersModule: NotchModule {
         }
         if await isGone(listed) { return .stopped }
         for _ in 0..<followUps {
-            do { try await sleep(followUpInterval) } catch { break }
+            do { try await RealClock.sleep(followUpInterval, using: sleep) } catch { break }
             if await isGone(listed) { return .stopped }
         }
         setNote(.stillRunning, for: listed.id, clearingAfter: .seconds(3))
@@ -315,7 +315,7 @@ public final class DevServersModule: NotchModule {
         guard let delay else { return }
         let sleep = sleep
         noteTask = Task { [weak self] in
-            do { try await sleep(delay) } catch { return }
+            do { try await RealClock.sleep(delay, using: sleep) } catch { return }
             guard let self, !Task.isCancelled, self.note == next else { return }
             self.clearNote()
         }
