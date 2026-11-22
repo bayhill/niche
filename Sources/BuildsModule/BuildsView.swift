@@ -327,6 +327,13 @@ struct BuildsSettings: View {
                     } label: {
                         Text(repository.isGitHubDotCom ? repository.slug : repository.repoArgument)
                         Text((repository.folderPath as NSString).abbreviatingWithTildeInPath)
+                        if !repository.isHostConfirmed, repository.isWellFormed {
+                            HStack {
+                                Text("Host not confirmed; runs are not loaded.")
+                                Button("Confirm \(repository.host)…") { module.reviewHost(of: repository) }
+                                    .buttonStyle(.link)
+                            }
+                        }
                     }
                 }
                 HStack {
@@ -350,5 +357,32 @@ struct BuildsSettings: View {
             }
         }
         .formStyle(.grouped)
+        .alert(
+            module.pendingRepository.map(HostConfirmation.title) ?? "",
+            isPresented: Binding(
+                get: { module.pendingRepository != nil },
+                set: { if !$0 { module.cancelPendingRepository() } }
+            ),
+            presenting: module.pendingRepository
+        ) { repository in
+            Button(HostConfirmation.confirm(repository)) { module.confirmPendingRepository() }
+            Button("Cancel", role: .cancel) { module.cancelPendingRepository() }
+        } message: { repository in
+            Text(HostConfirmation.message(repository))
+        }
     }
+}
+
+/// The words of the question asked before gh is pointed at a host other than github.com. It names the host,
+/// since the remote comes from the folder's own Git config, which anyone who made the folder could have written.
+enum HostConfirmation {
+    static func title(_ repository: BuildRepository) -> String { "Load runs from \(repository.host)?" }
+
+    static func message(_ repository: BuildRepository) -> String {
+        "The remote of this folder names \(repository.host), not github.com. The GitHub CLI will contact "
+            + "\(repository.host) for \(repository.slug), using any sign-in it already has for that host. "
+            + "Confirm only if \(repository.host) is a GitHub Enterprise server that is trusted."
+    }
+
+    static func confirm(_ repository: BuildRepository) -> String { "Use \(repository.host)" }
 }

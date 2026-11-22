@@ -55,6 +55,9 @@ public final class BuildsModule: NotchModule {
     public private(set) var isFetching = false
     /// Why the last folder picked in Settings was not added; cleared by the next success.
     public private(set) var addError: RepositoryError?
+    /// A folder whose remote names a host other than github.com, waiting for the user to confirm that host in
+    /// Settings. It is not stored, and gh is not run for it, until `confirmPendingRepository()`.
+    public private(set) var pendingRepository: BuildRepository?
     /// True when the app can open Settings on this module's pane.
     public var canOpenSettings: Bool { context?.services.openSettings != nil }
 
@@ -251,14 +254,20 @@ public final class BuildsModule: NotchModule {
             return
         }
         let fetcher = RunFetcher(executable: gh, runner: runner, files: files, environment: GitHubCLI.environment(base: environment))
-        let results = await withTaskGroup(of: (BuildRepository, FetchOutcome).self, returning: [(BuildRepository, FetchOutcome)].self) { group in
-            for repository in repositories {
+        // Entries gh must not be run for (an unconfirmed host, a malformed hand edit) keep a row that says why.
+        let refused = repositories.compactMap { repository in
+            RunFetcher.refusal(for: repository).map { (repository, FetchOutcome.problem($0)) }
+        }
+        let fetchable = repositories.filter(\.mayFetch)
+        let fetched = await withTaskGroup(of: (BuildRepository, FetchOutcome).self, returning: [(BuildRepository, FetchOutcome)].self) { group in
+            for repository in fetchable {
                 group.addTask { (repository, await fetcher.fetch(repository)) }
             }
             var found: [(BuildRepository, FetchOutcome)] = []
             for await result in group { found.append(result) }
             return found
         }
+        let results = refused + fetched
         guard current == generation else { return }
         lastFetched = now()
 
@@ -337,6 +346,8 @@ public final class BuildsModule: NotchModule {
     }
 
     /// Reads the folder's remote and adds it to the list. Sets `addError` when the folder cannot be used.
+    /// A remote on a host other than github.com is not added yet: it becomes `pendingRepository`, for Settings to
+    /// ask about by name, and this returns `false`.
     @discardableResult
     public func addRepository(at folder: URL) -> Bool {
         guard !isFixture, let settings else { return false }
@@ -344,6 +355,13 @@ public final class BuildsModule: NotchModule {
             let repository = try BuildRepository.read(folder: folder, files: files)
             var list = settings.get(Self.repositoriesKey)
             guard !list.contains(where: { $0.id == repository.id }) else { throw .alreadyAdded }
+            addError = nil
+            guard repository.isGitHubDotCom else {
+                log?.notice("repository on another host waits for confirmation: \(repository.repoArgument, privacy: .private)")
+                pendingRepository = repository
+                return false
+            }
+            pendingRepository = nil
             list.append(repository)
             settings.set(Self.repositoriesKey, list)
             addError = nil
@@ -357,8 +375,38 @@ public final class BuildsModule: NotchModule {
         }
     }
 
+    /// Asks again about the host of a stored entry that is not confirmed, such as one edited by hand.
+    public func reviewHost(of repository: BuildRepository) {
+        guard !isFixture, !repository.isHostConfirmed, repository.isWellFormed else { return }
+        pendingRepository = repository
+    }
+
+    /// The user confirmed `pendingRepository`'s host: store the entry (or update the stored one) with that host
+    /// confirmed, and fetch it.
+    public func confirmPendingRepository() {
+        guard !isFixture, let settings, var repository = pendingRepository else { return }
+        pendingRepository = nil
+        repository.confirmedHost = repository.host
+        var list = settings.get(Self.repositoriesKey)
+        if let index = list.firstIndex(where: { $0.id == repository.id }) {
+            list[index] = repository
+        } else {
+            list.append(repository)
+        }
+        settings.set(Self.repositoriesKey, list)
+        log?.notice("confirmed host for \(repository.repoArgument, privacy: .private)")
+        Motion.animate(Motion.morph) { outcomes[repository.id] = nil }
+        if running { restartLoop() }
+    }
+
+    /// The user declined `pendingRepository`'s host: nothing is stored or changed.
+    public func cancelPendingRepository() {
+        pendingRepository = nil
+    }
+
     public func removeRepository(_ repository: BuildRepository) {
         guard !isFixture, let settings else { return }
+        if pendingRepository?.id == repository.id { pendingRepository = nil }
         var list = settings.get(Self.repositoriesKey)
         list.removeAll { $0.id == repository.id }
         settings.set(Self.repositoriesKey, list)

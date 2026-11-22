@@ -10,8 +10,8 @@ import Testing
         let states = parser.feed(StreamFixture.full(StreamFixture.track))
         #expect(states.count == 1)
         let s = try! #require(states[0])
-        #expect(s.title == "Weightless")
-        #expect(s.artist == "Marconi Union")
+        #expect(s.title == "Paper Lanterns at Low Tide")
+        #expect(s.artist == "Saltmere Quartet")
         #expect(s.isPlaying)
         #expect(s.bundleID == "com.spotify.client")
         #expect(s.duration == 480)
@@ -21,12 +21,12 @@ import Testing
         // Pause: only the changed key arrives.
         let paused = parser.feed(StreamFixture.diff(["playing": false]))
         #expect(paused.first??.isPlaying == false)
-        #expect(paused.first??.title == "Weightless")
+        #expect(paused.first??.title == "Paper Lanterns at Low Tide")
 
         // A vanished key arrives as null and must be removed.
         let noArtist = parser.feed(StreamFixture.diff(["artist": NSNull()]))
         #expect(noArtist.first??.artist == nil)
-        #expect(noArtist.first??.album == "Ambient")
+        #expect(noArtist.first??.album == "Harbour Hours")
     }
 
     @Test func emptyPayloadMeansNothingPlaying() {
@@ -48,7 +48,7 @@ import Testing
 
     @Test func partialLinesAcrossArbitraryChunks() {
         var stream = StreamFixture.full(StreamFixture.track)
-        stream.append(StreamFixture.diff(["title": "Electra", "elapsedTimeMicros": 0]))
+        stream.append(StreamFixture.diff(["title": "Copper Orbit", "elapsedTimeMicros": 0]))
         stream.append(StreamFixture.diff(["playing": false]))
         for chunkSize in [1, 2, 7, 64, 1000] {
             var parser = AdapterStreamParser()
@@ -62,7 +62,7 @@ import Testing
                 }
                 offset = end
             }
-            #expect(titles == ["Weightless", "Electra", "Electra"], "chunk size \(chunkSize)")
+            #expect(titles == ["Paper Lanterns at Low Tide", "Copper Orbit", "Copper Orbit"], "chunk size \(chunkSize)")
             #expect(playing == [true, true, false], "chunk size \(chunkSize)")
         }
     }
@@ -82,7 +82,7 @@ import Testing
         data.append(StreamFixture.full(StreamFixture.track))
         let states = parser.feed(data)
         #expect(states.count == 1)
-        #expect(states[0]?.title == "Weightless")
+        #expect(states[0]?.title == "Paper Lanterns at Low Tide")
         #expect(parser.malformedLines == 2)
     }
 

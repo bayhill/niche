@@ -2,7 +2,7 @@ import CoreGraphics
 import Foundation
 import NotchCore
 
-/// Fixture provider: one fixed track, never touches the system.
+/// Fixture provider: one fixed track, never touches the system. Track, artist and album names are invented.
 @MainActor
 public final class SampleProvider: NowPlayingProvider {
     public let source = NowPlayingSource.sample
@@ -26,7 +26,7 @@ public final class SampleProvider: NowPlayingProvider {
 
     public static var track: NowPlayingState {
         NowPlayingState(
-            title: "Weightless", artist: "Marconi Union", album: "Ambient Transmissions Vol. 2",
+            title: "Paper Lanterns at Low Tide", artist: "Saltmere Quartet", album: "Harbour Hours, Vol. 2",
             artwork: sampleArtwork, isPlaying: true, bundleID: "com.spotify.client", elapsed: 154, duration: 480, timestamp: .now,
             playbackRate: 1
         )
@@ -35,9 +35,9 @@ public final class SampleProvider: NowPlayingProvider {
     /// A title and artist too long for the wings, to show truncation.
     public static var longTrack: NowPlayingState {
         var s = track
-        s.title = "Music for Airports 1/1 (Remastered 2004 Extended Version)"
-        s.artist = "Brian Eno and the Ambient Orchestra of Somewhere Far"
-        s.album = "Ambient 1: Music for Airports"
+        s.title = "Paper Lanterns at Low Tide (Night Ferry Reprise, Restored Extended Edition)"
+        s.artist = "Saltmere Quartet and the Glasswing Chamber Ensemble of Nowhere Near"
+        s.album = "Harbour Hours, Vol. 2: The Long Crossing"
         return s
     }
 

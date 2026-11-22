@@ -29,7 +29,7 @@ private let locations = AdapterLocations(
 @Suite struct AdapterProviderTests {
     @Test func streamsStatesAndRestartsWithBackoff() async {
         let first = FakeChild(chunks: [StreamFixture.full(StreamFixture.track)], status: 1)
-        let second = FakeChild(chunks: [StreamFixture.full(StreamFixture.track), StreamFixture.diff(["title": "Electra"])], status: 1)
+        let second = FakeChild(chunks: [StreamFixture.full(StreamFixture.track), StreamFixture.diff(["title": "Copper Orbit"])], status: 1)
         let launcher = FakeLauncher(children: [first, second])
         let sleeper = RecordingSleeper()
         let provider = AdapterProvider(
@@ -49,7 +49,7 @@ private let locations = AdapterLocations(
         #expect(sleeper.recorded == [.milliseconds(100), .milliseconds(200), .milliseconds(400)])
         #expect(launcher.launched[0] == [locations.script.path, locations.framework.path, "stream", "--micros", "--debounce=60"])
         // Same track after restart is not re-delivered; the title change is; giving up clears.
-        #expect(states.map { $0?.title } == ["Weightless", "Electra", nil])
+        #expect(states.map { $0?.title } == ["Paper Lanterns at Low Tide", "Copper Orbit", nil])
     }
 
     @Test func stopTerminatesChild() async {
@@ -60,7 +60,7 @@ private let locations = AdapterLocations(
         provider.onUpdate = { latest = $0 }
         provider.start()
         provider.start() // idempotent
-        #expect(await eventually { latest?.title == "Weightless" })
+        #expect(await eventually { latest?.title == "Paper Lanterns at Low Tide" })
         #expect(launcher.launched.count == 1)
         provider.stop()
         #expect(child.terminated)
@@ -118,10 +118,10 @@ private let locations = AdapterLocations(
 @MainActor
 @Suite struct AppleScriptProviderTests {
     @Test func parsesSpotifyOutputWithDecimalComma() throws {
-        let out = "playing\nElectra\nAirstream\nElectra EP\n301,5\n12,25\nhttps://i.scdn.co/image/ab67\n"
+        let out = "playing\nCopper Orbit\nGlasswing Chamber Ensemble\nCopper Orbit EP\n301,5\n12,25\nhttps://i.scdn.co/image/ab67\n"
         let parsed = try #require(PlayerScriptOutput.parse(out, player: .spotify, now: Date(timeIntervalSince1970: 0)))
-        #expect(parsed.state.title == "Electra")
-        #expect(parsed.state.artist == "Airstream")
+        #expect(parsed.state.title == "Copper Orbit")
+        #expect(parsed.state.artist == "Glasswing Chamber Ensemble")
         #expect(parsed.state.duration == 301.5)
         #expect(parsed.state.elapsed == 12.25)
         #expect(parsed.state.isPlaying)
@@ -350,11 +350,13 @@ struct RealAdapterTests {
         #expect(await eventually { !alive(firstPID) })
         provider.start()
         #expect(await eventually { recorded().count == 2 })
+        // The child can write its pid before the provider has handled the `.launched` event, and a stopped run
+        // drops its late events by design, so wait for the count before stopping again.
+        #expect(await eventually { provider.launches == 2 })
         let secondPID = recorded()[1]
         #expect(alive(secondPID))
         #expect(!alive(firstPID))
         provider.stop()
         #expect(await eventually { !alive(secondPID) })
-        #expect(provider.launches == 2)
     }
 }

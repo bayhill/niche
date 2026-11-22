@@ -111,8 +111,8 @@ enum StreamFixture {
     static func diff(_ payload: [String: Any]) -> Data { line(["type": "data", "diff": true, "payload": payload]) }
 
     static var track: [String: Any] { [
-        "bundleIdentifier": "com.spotify.client", "playing": true, "title": "Weightless", "artist": "Marconi Union",
-        "album": "Ambient", "durationMicros": 480_000_000, "elapsedTimeMicros": 12_500_000,
+        "bundleIdentifier": "com.spotify.client", "playing": true, "title": "Paper Lanterns at Low Tide", "artist": "Saltmere Quartet",
+        "album": "Harbour Hours", "durationMicros": 480_000_000, "elapsedTimeMicros": 12_500_000,
         "timestampEpochMicros": 1_790_000_000_000_000, "artworkMimeType": "image/png",
     ] }
 }

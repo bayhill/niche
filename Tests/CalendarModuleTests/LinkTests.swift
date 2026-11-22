@@ -200,4 +200,81 @@ import Testing
         let wrapped = "https://eur02.safelinks.protection.outlook.com/?url=zoommtg%3A%2F%2Fzoom.us%2Fjoin%3Fconfno%3D81234567890"
         #expect(link(notes: wrapped) == nil)
     }
+
+    @Test func dotSegmentsAreRejectedForEveryProvider() {
+        let users = "?users=8:orgid:00000000-0000-0000-0000-000000000000"
+        for text in [
+            "https://teams.microsoft.com/l/meetup-join/../../l/call/0/0\(users)",
+            "https://teams.microsoft.com/l/meetup-join/%2e%2e/%2e%2e/l/call/0/0\(users)",
+            "https://teams.microsoft.com/l/meetup-join/%2E%2E/%2E%2E/l/call/0/0\(users)",
+            "https://teams.microsoft.com/l/meetup-join/.%2E/%2e./l/call/0/0\(users)",
+            "https://teams.microsoft.com/l/meetup-join/%252e%252e/%252E%252E/l/call/0/0\(users)",  // encoded twice
+            "https://teams.microsoft.com/l/meetup-join/%2e%2e%2f%2e%2e%2fl/call/0/0\(users)",  // encoded slashes
+            "https://teams.microsoft.com/l/meetup-join/..%5c..%5cl/call/0/0\(users)",  // encoded backslashes
+            "https://teams.microsoft.com/l/meetup-join/./19%3ameeting_x%40thread.v2/0",
+            "https://teams.cloud.microsoft/l/meetup-join/19%3ameeting_x%40thread.v2/0/../../../l/call/0/0",
+            "https://teams.microsoft.com/meet/../l/call/0/0",
+            "https://teams.live.com/meet/%2E%2E/l/chat/0/0",
+            "https://acme.zoom.us/j/81234567890/../w",
+            "https://acme.zoom.us/wc/join/%2e%2E/81234567890",
+            "https://meet.google.com/./abc-defg-hij",
+            "https://acme.webex.com/meet/../../admin",
+            "https://acme.webex.com/meet/%2e%2e/admin",
+            "https://acme.webex.com/meet/./x",
+            "https://acme.webex.com/meet/%zz",  // broken encoding
+        ] {
+            #expect(link(notes: text) == nil, "\(text)")
+            #expect(link(url: text) == nil, "\(text)")
+        }
+        // Names that merely contain dots are fine.
+        #expect(link(notes: "https://acme.webex.com/meet/first.last")?.provider == .webex)
+        #expect(link(notes: "https://acme.webex.com/meet/...")?.provider == .webex)
+    }
+
+    @Test func dotSegmentsInsideSafeLinksAreRejected() {
+        let hostile = "https://teams.microsoft.com/l/meetup-join/../../l/call/0/0?users=x"
+        let wrapped = "https://eur02.safelinks.protection.outlook.com/?url="
+            + hostile.addingPercentEncoding(withAllowedCharacters: .alphanumerics)!
+        #expect(link(notes: wrapped) == nil)
+    }
+
+    @Test func theTeamsAppLinkNeedsTheMeetupJoinShape() {
+        // Still a Teams link for the browser, but not in a form the app link is built from.
+        for text in [
+            "https://teams.microsoft.com/l/meetup-join/19%3a1",
+            "https://teams.microsoft.com/l/meetup-join/19%3ameeting_x%40thread.v2",
+            "https://teams.microsoft.com/l/meetup-join/19%3ameeting_x%40thread.v2/0/extra",
+            "https://teams.microsoft.com/l/meetup-join/19%3ameeting_x%40thread.v2/0/",
+            "https://teams.microsoft.com/l/meetup-join/19%3ameeting_x%40thread.v2/zero",
+            "https://teams.microsoft.com/l/meetup-join/meeting_x%40thread.v2/0",
+            "https://teams.microsoft.com/l/meetup-join/19%3ameeting%2fx%40thread.v2/0",  // an encoded slash in the thread
+            "https://teams.microsoft.com/l/meetup-join/19%3ameeting%3cx%3e/0",
+            "https://teams.microsoft.com/l/meetup-join//19%3ameeting_x%40thread.v2/0",
+        ] {
+            let l = link(notes: text)
+            #expect(l?.provider == .teams, "\(text)")
+            #expect(l?.appURL == nil, "\(text)")
+        }
+        #expect(link(notes: "https://teams.microsoft.com/L/Meetup-Join/19%3Ameeting_x%40thread.tacv2/12?context=%7b%7d")?.appURL?.absoluteString
+            == "msteams:/L/Meetup-Join/19%3Ameeting_x%40thread.tacv2/12?context=%7b%7d")
+    }
+
+    @Test func theAppLinkIsCheckedEvenForALinkBuiltByHand() {
+        // `appURL` does not rely on `classify` having run first.
+        let hostile = MeetingLink(provider: .teams, url: URL(string: "https://teams.microsoft.com/l/meetup-join/../../l/call/0/0?users=x")!)
+        #expect(hostile.appURL == nil)
+        let encoded = MeetingLink(provider: .teams, url: URL(string: "https://teams.microsoft.com/l/meetup-join/%2e%2e/%2E%2e/l/call/0/0")!)
+        #expect(encoded.appURL == nil)
+    }
+
+    @Test func dotSegmentDetection() {
+        #expect(MeetingLinkExtractor.hasDotSegments("/a/../b"))
+        #expect(MeetingLinkExtractor.hasDotSegments("/a/./b"))
+        #expect(MeetingLinkExtractor.hasDotSegments("/a/%2e%2E"))
+        #expect(MeetingLinkExtractor.hasDotSegments("/a/%25%32%65%25%32%65/b"))  // "%2e%2e" encoded again
+        #expect(MeetingLinkExtractor.hasDotSegments("/a/%"))
+        #expect(!MeetingLinkExtractor.hasDotSegments("/a/b.c/...d/e..f"))
+        #expect(!MeetingLinkExtractor.hasDotSegments(""))
+        #expect(!MeetingLinkExtractor.hasDotSegments("/l/meetup-join/19%3ameeting_x%40thread.v2/0"))
+    }
 }

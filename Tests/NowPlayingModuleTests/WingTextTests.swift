@@ -9,17 +9,17 @@ import Testing
     let t = Date(timeIntervalSince1970: 1_000)
 
     @Test func titleAndArtistInTheWings() throws {
-        let a = try #require(NowPlayingActivity.make(NowPlayingState(title: "Weightless", artist: "Marconi Union", isPlaying: true), updatedAt: t))
-        #expect(a.leadingText == "Weightless")
-        #expect(a.trailingText == "Marconi Union")
-        #expect(a.accessibilityLabel == "Playing Weightless by Marconi Union")
+        let a = try #require(NowPlayingActivity.make(NowPlayingState(title: "Paper Lanterns at Low Tide", artist: "Saltmere Quartet", isPlaying: true), updatedAt: t))
+        #expect(a.leadingText == "Paper Lanterns at Low Tide")
+        #expect(a.trailingText == "Saltmere Quartet")
+        #expect(a.accessibilityLabel == "Playing Paper Lanterns at Low Tide by Saltmere Quartet")
         #expect(a.priority == .ambient)
         #expect(a.trailing == .equalizer(playing: true))
         #expect(a.leading == .symbol("music.note", tint: .primary)) // never tinted
     }
 
     @Test func offMeansExactlyTheOldActivity() throws {
-        let s = NowPlayingState(title: "Weightless", artist: "Marconi Union", isPlaying: true)
+        let s = NowPlayingState(title: "Paper Lanterns at Low Tide", artist: "Saltmere Quartet", isPlaying: true)
         let a = try #require(NowPlayingActivity.make(s, updatedAt: t, showText: false))
         #expect(a.leadingText == nil)
         #expect(a.trailingText == nil)
@@ -39,9 +39,9 @@ import Testing
 
     @Test func whitespaceIsTrimmedAndEmptyIsOmitted() {
         let a = NowPlayingActivity.make(
-            NowPlayingState(title: "  Weightless \n", artist: "   ", album: "\tAmbient ", isPlaying: true), updatedAt: t
+            NowPlayingState(title: "  Paper Lanterns at Low Tide \n", artist: "   ", album: "\tAmbient ", isPlaying: true), updatedAt: t
         )
-        #expect(a?.leadingText == "Weightless")
+        #expect(a?.leadingText == "Paper Lanterns at Low Tide")
         #expect(a?.trailingText == "Ambient") // blank artist falls back to the album
         let blank = NowPlayingActivity.make(NowPlayingState(title: " \n ", artist: "", album: " ", isPlaying: true), updatedAt: t)
         #expect(blank?.leadingText == nil)
@@ -84,13 +84,13 @@ import Testing
         let env = try TestEnvironment(); defer { env.cleanUp() }
         let module = NowPlayingModule.sample()
         await module.start(env.context(for: .nowPlaying))
-        #expect(module.liveActivity?.leadingText == "Weightless")
+        #expect(module.liveActivity?.leadingText == "Paper Lanterns at Low Tide")
         env.settings.set(NowPlayingModule.showTitleInNotch, false)
         #expect(await eventually { module.liveActivity?.leadingText == nil })
         #expect(module.liveActivity != nil) // artwork and equalizer stay
         #expect(module.liveActivity?.trailingText == nil)
         env.settings.set(NowPlayingModule.showTitleInNotch, true)
-        #expect(await eventually { module.liveActivity?.trailingText == "Marconi Union" })
+        #expect(await eventually { module.liveActivity?.trailingText == "Saltmere Quartet" })
         module.stop()
     }
 

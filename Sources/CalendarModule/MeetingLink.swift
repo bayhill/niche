@@ -41,7 +41,10 @@ public extension MeetingLink {
         switch provider {
         case .teams:
             // What the Teams launcher page itself navigates to: msteams:/l/meetup-join/<thread>/0?context=...
-            guard host == "teams.microsoft.com" || host == "teams.cloud.microsoft", path.lowercased().hasPrefix("/l/meetup-join/") else { return nil }
+            // Only that exact shape is handed to the app; any other Teams path stays a browser link.
+            guard host == "teams.microsoft.com" || host == "teams.cloud.microsoft", MeetingLinkExtractor.isMeetupJoinPath(path),
+                  !MeetingLinkExtractor.hasDotSegments(path)
+            else { return nil }
             out.scheme = "msteams"
             out.percentEncodedPath = path
             out.percentEncodedQuery = parts.percentEncodedQuery
@@ -90,6 +93,8 @@ public enum MeetingLinkExtractor {
         else { return nil }
         let host = rawHost.lowercased()
         let path = components.percentEncodedPath
+        // `..` would let a link on a meeting host steer to any other page of it, in the browser or in the app.
+        guard !hasDotSegments(path) else { return nil }
         let segments = path.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
 
         func isHost(_ domain: String) -> Bool { host == domain || host.hasSuffix("." + domain) }
@@ -128,6 +133,32 @@ public enum MeetingLinkExtractor {
             return link(.webex, rebuilt())
         }
         return nil
+    }
+
+    /// True when a percent-encoded path has a `.` or `..` segment in any spelling (`%2e`, `%2E`, mixed, encoded more
+    /// than once), counting a backslash as a separator as some parsers do. A path whose encoding is broken counts as one too.
+    static func hasDotSegments(_ percentEncodedPath: String) -> Bool {
+        var current = percentEncodedPath
+        for _ in 0..<4 {
+            let segments = current.split(omittingEmptySubsequences: false) { $0 == "/" || $0 == "\\" }
+            if segments.contains(where: { $0 == "." || $0 == ".." }) { return true }
+            guard let decoded = current.removingPercentEncoding else { return true }
+            if decoded == current { return false }
+            current = decoded
+        }
+        return true // still decoding after several rounds: refused rather than guessed at
+    }
+
+    /// `/l/meetup-join/<thread id>/<number>` and nothing more: a thread id such as `19%3ameeting_…%40thread.v2`
+    /// (`19:` then letters, digits and `_ - . @ :`), then a number.
+    static func isMeetupJoinPath(_ percentEncodedPath: String) -> Bool {
+        let parts = percentEncodedPath.split(separator: "/", omittingEmptySubsequences: false)
+        guard parts.count == 5, parts[0].isEmpty, parts[1].lowercased() == "l", parts[2].lowercased() == "meetup-join" else { return false }
+        guard let thread = String(parts[3]).removingPercentEncoding, thread.hasPrefix("19:"), thread.count > 3,
+              thread.unicodeScalars.allSatisfy({ $0.isASCII && (CharacterSet.alphanumerics.contains($0) || "_-.@:".unicodeScalars.contains($0)) })
+        else { return false }
+        let number = parts[4]
+        return (1...20).contains(number.count) && number.allSatisfy { $0.isASCII && $0.isNumber }
     }
 
     /// Google Meet codes look like `abc-defg-hij`.

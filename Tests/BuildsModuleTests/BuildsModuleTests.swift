@@ -27,14 +27,14 @@ private final class Harness {
         set { browser.chosen = newValue }
     }
 
-    init(activity: Duration = .seconds(60)) throws {
+    init(activity: Duration = .seconds(60), environment: [String: String] = ["HOME": "/Users/example"]) throws {
         env = try TestEnvironment()
         let sleeper = sleeper, clock = clock, installed = installed, browser = browser
         module = BuildsModule(
             runner: gh.runner,
             files: DiskRepositoryFiles(),
             isExecutable: { $0 == "/opt/homebrew/bin/gh" && installed.on },
-            environment: ["HOME": "/Users/example"],
+            environment: environment,
             now: { clock.now },
             sleep: { try await sleeper.sleep($0) },
             openURL: { browser.opened.append($0) },
@@ -43,11 +43,18 @@ private final class Harness {
         )
     }
 
-    /// A repository folder whose origin is `acme/<name>`, on `branch`, added through the module.
+    /// A repository folder whose origin is `acme/<name>`, on `branch`, added through the module; a host other than
+    /// github.com is confirmed the way Settings does it.
     @discardableResult
     func add(_ name: String, branch: String = "main", host: String = "github.com") throws -> URL {
         let folder = try makeRepository(in: env.root, name, remotes: [("origin", "git@\(host):acme/\(name).git")], head: "ref: refs/heads/\(branch)\n")
-        #expect(module.addRepository(at: folder))
+        if host == "github.com" {
+            #expect(module.addRepository(at: folder))
+        } else {
+            #expect(!module.addRepository(at: folder))
+            #expect(module.pendingRepository?.host == host)
+            module.confirmPendingRepository()
+        }
         return folder
     }
 
@@ -115,7 +122,10 @@ private final class Harness {
     }
 
     @Test func fetchesEachRepositoryOnItsBranchWithAQuietEnvironment() async throws {
-        let h = try Harness(); defer { h.cleanUp() }
+        let h = try Harness(environment: [
+            "HOME": "/Users/example", "GH_ENTERPRISE_TOKEN": "invented-1", "GITHUB_ENTERPRISE_TOKEN": "invented-2",
+            "GH_HOST": "git.example.org",
+        ]); defer { h.cleanUp() }
         await h.start()
         try h.add("widget", branch: "feature/login")
         try h.add("tools", host: "git.example.com")
@@ -356,6 +366,102 @@ private final class Harness {
         h.module.removeRepository(widget)
         #expect(h.env.settings.get(BuildsModule.repositoriesKey).map(\.slug) == ["acme/tools"])
         #expect(h.module.rows.map(\.repository.slug) == ["acme/tools"])
+    }
+
+    @Test func anotherHostIsAddedOnlyOnceConfirmed() async throws {
+        let h = try Harness(); defer { h.cleanUp() }
+        await h.start()
+        await h.waitForSleep()
+        let folder = try makeRepository(in: h.env.root, "tools", remotes: [("origin", "https://git.example.org/acme/tools.git")])
+
+        // Picked, then declined: nothing stored, gh never pointed at the host.
+        h.chosen = folder
+        await h.module.chooseRepository()
+        #expect(h.module.pendingRepository?.repoArgument == "git.example.org/acme/tools")
+        #expect(h.module.addError == nil)
+        #expect(h.env.settings.get(BuildsModule.repositoriesKey).isEmpty)
+        h.module.cancelPendingRepository()
+        #expect(h.module.pendingRepository == nil)
+        #expect(h.env.settings.get(BuildsModule.repositoriesKey).isEmpty)
+        await h.nextRefresh()
+        #expect(h.gh.calls.isEmpty)
+
+        // Picked again and confirmed: stored with the host it was confirmed for, then fetched.
+        #expect(!h.module.addRepository(at: folder))
+        h.gh.runs("git.example.org/acme/tools", branch: "main", [RunJSON(id: 5, conclusion: "success")])
+        h.module.confirmPendingRepository()
+        let stored = h.env.settings.get(BuildsModule.repositoriesKey)
+        #expect(stored.map(\.confirmedHost) == ["git.example.org"])
+        #expect(stored.first?.mayFetch == true)
+        await waitUntil { h.module.rows.first?.run != nil }
+        #expect(h.gh.calls.map { FakeGitHub.key($0.arguments) }.contains("git.example.org/acme/tools|main"))
+        #expect(h.module.rows.first?.state == .passed)
+
+        // github.com needs no question.
+        #expect(h.module.addRepository(at: try makeRepository(in: h.env.root, "widget")))
+        #expect(h.module.pendingRepository == nil)
+    }
+
+    @Test func storedEntriesThatWereNeverConfirmedAreNotFetched() async throws {
+        let h = try Harness(); defer { h.cleanUp() }
+        let folder = try makeRepository(in: h.env.root, "tools", remotes: [("origin", "https://git.example.org/acme/tools.git")])
+        let path = folder.standardizedFileURL.path(percentEncoded: false).trimmingTrailingSlash
+        // As if the preferences had been edited by hand.
+        let unconfirmed = BuildRepository(folderPath: path, host: "git.example.org", owner: "acme", name: "tools")
+        let otherHost = BuildRepository(folderPath: h.env.root.path + "/moved", host: "evil.example", owner: "acme", name: "tools", confirmedHost: "git.example.org")
+        let malformed = BuildRepository(folderPath: h.env.root.path + "/odd", host: "github.com", owner: "--help", name: "tools")
+        let fine = BuildRepository(folderPath: h.env.root.path + "/fine", host: "github.com", owner: "acme", name: "widget")
+        h.env.settings.set(BuildsModule.repositoriesKey, [unconfirmed, otherHost, malformed, fine])
+        await h.start()
+        await h.waitForSleep()
+        await waitUntil { h.module.rows.allSatisfy { $0.content != .loading } }
+
+        #expect(h.gh.calls.map { FakeGitHub.key($0.arguments) } == ["acme/widget|-"])
+        let content = Dictionary(uniqueKeysWithValues: h.module.rows.map { ($0.id, $0.content) })
+        #expect(content[unconfirmed.id] == .problem(.hostNotConfirmed))
+        #expect(content[otherHost.id] == .problem(.hostNotConfirmed))
+        #expect(content[malformed.id] == .problem(.invalidEntry))
+        #expect(content[fine.id] == .noRuns)
+
+        // Settings can ask about a well-formed entry; a malformed one can only be removed.
+        h.module.reviewHost(of: malformed)
+        #expect(h.module.pendingRepository == nil)
+        h.module.reviewHost(of: fine)
+        #expect(h.module.pendingRepository == nil)
+        h.module.reviewHost(of: unconfirmed)
+        #expect(h.module.pendingRepository == unconfirmed)
+        h.module.confirmPendingRepository()
+        let stored = h.env.settings.get(BuildsModule.repositoriesKey)
+        #expect(stored.count == 4)  // updated in place, not added twice
+        #expect(stored.first { $0.id == unconfirmed.id }?.confirmedHost == "git.example.org")
+        await waitUntil { h.gh.calls.contains { FakeGitHub.key($0.arguments) == "git.example.org/acme/tools|main" } }
+        #expect(h.gh.calls.contains { FakeGitHub.key($0.arguments) == "git.example.org/acme/tools|main" })
+        #expect(!h.gh.calls.contains { $0.arguments.contains { $0.contains("evil.example") || $0.contains("--help") } })
+    }
+
+    @Test func entriesStoredBeforeConfirmationExistedDecodeAsUnconfirmed() throws {
+        let json = #"[{"folderPath":"/tmp/a","host":"git.example.org","owner":"acme","name":"tools"},"#
+            + #"{"folderPath":"/tmp/b","host":"github.com","owner":"acme","name":"widget"}]"#
+        let decoded = try JSONDecoder().decode([BuildRepository].self, from: Data(json.utf8))
+        #expect(decoded.map(\.confirmedHost) == [nil, nil])
+        #expect(decoded.map(\.mayFetch) == [false, true])
+        // And a confirmation survives a round trip.
+        var confirmed = decoded[0]
+        confirmed.confirmedHost = "git.example.org"
+        let again = try JSONDecoder().decode(BuildRepository.self, from: JSONEncoder().encode(confirmed))
+        #expect(again.mayFetch)
+    }
+
+    @Test func removingAPendingRepositoryForgetsTheQuestion() async throws {
+        let h = try Harness(); defer { h.cleanUp() }
+        await h.start()
+        let pending = BuildRepository(folderPath: h.env.root.path + "/x", host: "git.example.org", owner: "acme", name: "x")
+        h.env.settings.set(BuildsModule.repositoriesKey, [pending])
+        h.module.reviewHost(of: pending)
+        h.module.removeRepository(pending)
+        #expect(h.module.pendingRepository == nil)
+        h.module.confirmPendingRepository()
+        #expect(h.env.settings.get(BuildsModule.repositoriesKey).isEmpty)
     }
 
     @Test func theBranchIsReadAtEachRefresh() async throws {

@@ -8,9 +8,13 @@ public struct BuildRepository: Codable, Sendable, Equatable, Hashable, Identifia
     public var host: String
     public var owner: String
     public var name: String
+    /// The host the user confirmed in Settings for this entry; only needed when `host` is not github.com. An entry
+    /// whose confirmed host is missing or differs from `host` (a hand-edited preference, say) is never fetched.
+    public var confirmedHost: String?
 
-    public init(folderPath: String, host: String, owner: String, name: String) {
+    public init(folderPath: String, host: String, owner: String, name: String, confirmedHost: String? = nil) {
         self.folderPath = folderPath; self.host = host; self.owner = owner; self.name = name
+        self.confirmedHost = confirmedHost
     }
 
     /// One entry per folder: two worktrees of one repository are two entries, each on its own branch.
@@ -21,6 +25,16 @@ public struct BuildRepository: Codable, Sendable, Equatable, Hashable, Identifia
     public var isGitHubDotCom: Bool { host == "github.com" }
     /// The value for gh's `--repo`: `[HOST/]OWNER/NAME`, the host only when it is not github.com.
     public var repoArgument: String { isGitHubDotCom ? slug : "\(host)/\(slug)" }
+    /// github.com, or a host confirmed in Settings for this very entry.
+    public var isHostConfirmed: Bool { isGitHubDotCom || confirmedHost == host }
+    /// Host, owner and name pass the same checks as a freshly read remote, so a hand-edited entry cannot put
+    /// anything odd into gh's arguments.
+    public var isWellFormed: Bool {
+        host == host.lowercased() && RemoteURL.isName(host, allowDots: true) && RemoteURL.isName(owner, allowDots: false)
+            && RemoteURL.isName(name, allowDots: true)
+    }
+    /// Whether gh may be run for this entry at all.
+    public var mayFetch: Bool { isWellFormed && isHostConfirmed }
 
     /// Reads the folder's Git metadata: the `origin` remote, else the first remote.
     public static func read(folder: URL, files: any RepositoryFileReading) throws(RepositoryError) -> BuildRepository {
@@ -236,7 +250,7 @@ enum RemoteURL {
     }
 
     /// Letters, digits, `-`, `_` (and `.` where GitHub allows it). Keeps anything odd out of gh's arguments.
-    private static func isName(_ text: String, allowDots: Bool) -> Bool {
+    static func isName(_ text: String, allowDots: Bool) -> Bool {
         guard !text.isEmpty, !text.hasPrefix("-"), !text.hasPrefix("."), text != ".." else { return false }
         return text.unicodeScalars.allSatisfy { scalar in
             scalar.isASCII && (CharacterSet.alphanumerics.contains(scalar) || scalar == "-" || scalar == "_" || (allowDots && scalar == "."))

@@ -304,6 +304,58 @@ import Testing
         #expect(env == ["HOME": "/Users/example", "GH_PROMPT_DISABLED": "1", "NO_COLOR": "1", "GH_NO_UPDATE_NOTIFIER": "1"])
     }
 
+    @Test func environmentWithholdsEnterpriseTokensAndTheDefaultHost() {
+        let env = GitHubCLI.environment(base: [
+            "HOME": "/Users/example", "GH_ENTERPRISE_TOKEN": "invented-1", "GITHUB_ENTERPRISE_TOKEN": "invented-2",
+            "GH_HOST": "git.example.org",
+        ])
+        #expect(env == ["HOME": "/Users/example", "GH_PROMPT_DISABLED": "1", "NO_COLOR": "1", "GH_NO_UPDATE_NOTIFIER": "1"])
+    }
+
+    @Test func confirmationAndValidity() {
+        #expect(dotCom.isHostConfirmed && dotCom.mayFetch)
+        #expect(!enterprise.isHostConfirmed && !enterprise.mayFetch)
+        var confirmed = enterprise
+        confirmed.confirmedHost = "git.example.com"
+        #expect(confirmed.mayFetch)
+        confirmed.host = "evil.example"  // a host edited after confirming is not confirmed
+        #expect(!confirmed.mayFetch)
+        for bad in [
+            BuildRepository(folderPath: "/tmp/b", host: "GitHub.com", owner: "acme", name: "w"),
+            BuildRepository(folderPath: "/tmp/b", host: "github.com", owner: "a.b", name: "w"),
+            BuildRepository(folderPath: "/tmp/b", host: "github.com", owner: "acme", name: "-w"),
+            BuildRepository(folderPath: "/tmp/b", host: "github.com", owner: "acme", name: ".."),
+            BuildRepository(folderPath: "/tmp/b", host: "evil.example/x", owner: "acme", name: "w", confirmedHost: "evil.example/x"),
+            BuildRepository(folderPath: "/tmp/b", host: "github.com", owner: "", name: "w"),
+        ] {
+            #expect(!bad.isWellFormed, "\(bad)")
+            #expect(!bad.mayFetch, "\(bad)")
+        }
+    }
+
+    @Test func theFetcherRefusesWithoutRunningGh() async {
+        let gh = FakeGitHub()
+        let fetcher = RunFetcher(executable: URL(filePath: "/opt/homebrew/bin/gh"), runner: gh.runner, files: DiskRepositoryFiles(), environment: [:])
+        #expect(await fetcher.fetch(enterprise) == .problem(.hostNotConfirmed))
+        #expect(await fetcher.fetch(BuildRepository(folderPath: "/tmp/b", host: "github.com", owner: "-x", name: "w")) == .problem(.invalidEntry))
+        #expect(gh.calls.isEmpty)
+    }
+
+    @Test func theHostQuestionNamesTheHostAndFollowsTheContentRules() {
+        let title = HostConfirmation.title(enterprise)
+        let message = HostConfirmation.message(enterprise)
+        let confirm = HostConfirmation.confirm(enterprise)
+        #expect(title == "Load runs from git.example.com?")
+        #expect(message.contains("git.example.com"))
+        #expect(confirm.contains("git.example.com"))
+        for text in [title, message, confirm] {
+            #expect(!text.contains("!"))
+            let words = text.lowercased().split { !$0.isLetter }
+            #expect(!words.contains("you") && !words.contains("your") && !words.contains("we"))
+            #expect(text.first?.isUppercase == true)
+        }
+    }
+
     @Test func interpretsResults() {
         let ok = CommandResult(status: 0, stdout: Data(RunJSON.array([RunJSON(id: 3, conclusion: "success")]).utf8))
         #expect((try? GitHubCLI.interpret(ok).get())?.map(\.id) == [3])
@@ -319,7 +371,7 @@ import Testing
     }
 
     @Test func problemMessagesFollowTheContentRules() {
-        for problem in [RepositoryProblem.signedOut, .notFound, .timedOut, .unreadable, .failed] {
+        for problem in [RepositoryProblem.signedOut, .notFound, .timedOut, .unreadable, .failed, .hostNotConfirmed, .invalidEntry] {
             let text = problem.message(host: "github.com")
             #expect(!text.contains("!"))
             #expect(!text.lowercased().split(separator: " ").contains("you"))

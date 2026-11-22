@@ -11,6 +11,10 @@ public enum RepositoryProblem: Error, Sendable, Equatable {
     /// gh answered with something that is not a run list.
     case unreadable
     case failed
+    /// The entry names a host other than github.com that was never confirmed in Settings; gh is not run for it.
+    case hostNotConfirmed
+    /// The stored entry does not name a valid host, owner and repository; gh is not run for it.
+    case invalidEntry
 
     /// One quiet line for the repository's row.
     public func message(host: String) -> String {
@@ -20,6 +24,8 @@ public enum RepositoryProblem: Error, Sendable, Equatable {
         case .timedOut: "GitHub did not answer in time. Tries again at the next refresh."
         case .unreadable: "The gh output was not understood. Updating gh may help."
         case .failed: "Could not load runs. Tries again at the next refresh."
+        case .hostNotConfirmed: "Not checked: \(host) is not confirmed. Confirm it in Settings to load runs."
+        case .invalidEntry: "This entry is not valid. Remove it in Settings and add the folder again."
         }
     }
 }
@@ -58,9 +64,14 @@ enum GitHubCLI {
         return arguments
     }
 
-    /// The app's environment, with gh told never to prompt, colour or check for updates.
+    /// Variables never handed to gh. An enterprise token would go to whichever enterprise host a repository names,
+    /// and `GH_HOST` would pick a host without the user choosing it.
+    static let withheldVariables = ["GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN", "GH_HOST"]
+
+    /// The app's environment without `withheldVariables`, with gh told never to prompt, colour or check for updates.
     static func environment(base: [String: String]) -> [String: String] {
         var environment = base
+        for name in withheldVariables { environment[name] = nil }
         environment["GH_PROMPT_DISABLED"] = "1"
         environment["NO_COLOR"] = "1"
         environment["GH_NO_UPDATE_NOTIFIER"] = "1"
@@ -90,6 +101,7 @@ struct RunFetcher: Sendable {
     let environment: [String: String]
 
     func fetch(_ repository: BuildRepository) async -> FetchOutcome {
+        if let problem = RunFetcher.refusal(for: repository) { return .problem(problem) }
         let branch = GitFolder.branch(of: repository.folder, files: files)
         if let branch {
             switch await list(repository, branch: branch) {
@@ -102,6 +114,13 @@ struct RunFetcher: Sendable {
         case .success(let runs): return .runs(runs, branch: branch)
         case .failure(let problem): return .problem(problem)
         }
+    }
+
+    /// Why gh must not be run for an entry, or `nil` when it may.
+    static func refusal(for repository: BuildRepository) -> RepositoryProblem? {
+        if !repository.isWellFormed { return .invalidEntry }
+        if !repository.isHostConfirmed { return .hostNotConfirmed }
+        return nil
     }
 
     private func list(_ repository: BuildRepository, branch: String?) async -> Result<[BuildRun], RepositoryProblem> {
