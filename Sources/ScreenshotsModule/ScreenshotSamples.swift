@@ -22,7 +22,7 @@ enum ScreenshotSamples {
         Sample(minutesAgo: 310, width: 2400, height: 1560, bytes: 1_180_000, hue: 0.0, sidebar: true),
     ]
 
-    static let folder = "/Users/Shared/Notcher Samples"
+    static let folder = "/Users/Shared/Niche Samples"
 
     static func make(now: Date) -> ([Screenshot], [String: SendableImage]) {
         let names = DateFormatter()

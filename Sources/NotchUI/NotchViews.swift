@@ -44,7 +44,7 @@ struct NotchRootView: View {
             NotchContentView(model: model)
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Notcher")
+        .accessibilityLabel("Niche")
         // A click on the nudge does not expand, so it gets no "click to expand" hint either.
         .accessibilityHint(
             model.state == .expanded || model.state == .nudge
@@ -236,7 +236,7 @@ private struct WingsView: View {
     }
 }
 
-/// "Click to expand Notcher" below the notch, emerging from it as it swells.
+/// "Click to expand Niche" below the notch, emerging from it as it swells.
 private struct HoverHintView: View, Animatable {
     var progress: Double
     let text: String

@@ -1,5 +1,5 @@
 {
-  "description": "Passes a few fields of each event (no prompts or tool content) to Notcher's spool folder. Silent, and a no-op while Notcher's alerts are off.",
+  "description": "Passes a few fields of each event (no prompts or tool content) to Niche's spool folder. Silent, and a no-op while Niche's alerts are off.",
   "hooks": {
     "SessionStart": [
       {

@@ -52,7 +52,7 @@ struct NowPlayingCard: View {
                 GlassButton("Connect", prominence: .accent) { module.connect() }
             }
         case .notAuthorized(let app):
-            Prompt(symbol: "lock", title: "Allow Notcher to control \(app)", message: "Privacy & Security › Automation") {
+            Prompt(symbol: "lock", title: "Allow Niche to control \(app)", message: "Privacy & Security › Automation") {
                 GlassButton("Open System Settings") { module.openAutomationSettings() }
             }
         case .unavailable:
@@ -221,7 +221,7 @@ struct NowPlayingSettings: View {
                 LabeledContent("Spotify and Music") {
                     Button("Connect") { module.connect() }
                 }
-                Text("macOS asks once whether Notcher may control Spotify and Music.").font(.caption)
+                Text("macOS asks once whether Niche may control Spotify and Music.").font(.caption)
             }
             if let settings = module.settingsStore {
                 Toggle("Show title and artist beside the notch", isOn: settings.binding(NowPlayingModule.showTitleInNotch))

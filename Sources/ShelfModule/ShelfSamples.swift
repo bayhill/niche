@@ -29,7 +29,7 @@ enum ShelfSamples {
         var thumbnails: [String: SendableImage] = [:]
         for (index, sample) in samples.enumerated() {
             let item = ShelfItem(
-                path: "/Users/Shared/Notcher Samples/\(sample.name)", origin: sample.origin,
+                path: "/Users/Shared/Niche Samples/\(sample.name)", origin: sample.origin,
                 addedAt: now.addingTimeInterval(-minutesAgo[index % minutesAgo.count] * 60), size: sample.size
             )
             items.append(item)

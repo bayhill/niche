@@ -6,7 +6,7 @@ import SwiftUI
 /// Shows which Claude Code sessions are running and whether any needs the user.
 ///
 /// Two sources, merged by session id (see `SessionReducer`): Claude Code's live registry in `~/.claude/sessions`
-/// (read-only, no setup) and, once the user enables alerts, hook events from the `notcher-bridge` plugin that land
+/// (read-only, no setup) and, once the user enables alerts, hook events from the `niche-bridge` plugin that land
 /// in `<appSupport>/claude-events`.
 @MainActor
 @Observable
@@ -123,7 +123,7 @@ public final class ClaudeAgentsModule: NotchModule {
                           since: now.addingTimeInterval(-ago), lastEvent: now.addingTimeInterval(-ago))
         }
         return ClaudeAgentsModule(sampleSessions: [
-            s("sample-1", "notcher", "/Users/dev/projects/notcher", .needsPermission(detail: "Bash"), ago: 95),
+            s("sample-1", "niche", "/Users/dev/projects/niche", .needsPermission(detail: "Bash"), ago: 95),
             s("sample-2", "fix-login-redirect", "/Users/dev/projects/webshop", .needsInput(detail: nil), ago: 20, .vscode),
             s("sample-3", "lanternfly", "/Users/dev/projects/lanternfly", .working, ago: 380),
             s("sample-4", "garden-clock", "/Users/dev/projects/garden-clock", .finished(at: now.addingTimeInterval(-40)), ago: 40),
@@ -321,7 +321,7 @@ struct SampleHookInstaller: HookInstalling {
     func prepare() {}
     func plan() -> InstallPlan {
         let cli = URL(filePath: "/Users/dev/.local/bin/claude")
-        let root = "/Users/dev/Library/Application Support/Notcher/claude-plugin"
+        let root = "/Users/dev/Library/Application Support/Niche/claude-plugin"
         return InstallPlan(
             cli: cli,
             installCommands: [
@@ -334,9 +334,9 @@ struct SampleHookInstaller: HookInstalling {
             ],
             installSteps: [
                 "Copy the plugin from the app to \(root)",
-                "Back up /Users/dev/.claude/settings.json to /Users/dev/Library/Application Support/Notcher/claude-settings-backups/settings-<timestamp>.json",
+                "Back up /Users/dev/.claude/settings.json to /Users/dev/Library/Application Support/Niche/claude-settings-backups/settings-<timestamp>.json",
                 "Run the two commands below (if the second fails, the first is undone)",
-                "While Notcher runs with alerts on, keep /Users/dev/Library/Application Support/Notcher/claude-events for the plugin to drop events in",
+                "While Niche runs with alerts on, keep /Users/dev/Library/Application Support/Niche/claude-events for the plugin to drop events in",
             ],
             uninstallSteps: [],
             settingsFile: URL(filePath: "/Users/dev/.claude/settings.json"),

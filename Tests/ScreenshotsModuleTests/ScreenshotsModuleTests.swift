@@ -85,7 +85,7 @@ struct Rig {
     func shot(_ name: String, minutesAgo: Double = 0) -> Screenshot {
         let taken = clock.now.addingTimeInterval(-minutesAgo * 60)
         return Screenshot(
-            url: URL(fileURLWithPath: "/Users/Shared/Notcher Tests/\(name).png"), createdAt: taken, modifiedAt: taken,
+            url: URL(fileURLWithPath: "/Users/Shared/Niche Tests/\(name).png"), createdAt: taken, modifiedAt: taken,
             pixelSize: PixelSize(width: 1200, height: 800), bytes: 240_000
         )
     }
@@ -424,7 +424,7 @@ func eventually(_ condition: @MainActor () -> Bool) async throws {
 
 @Suite struct ImageIOThumbnailTests {
     @Test func downsamplesTellsGoneFromUnreadable() async throws {
-        let dir = FileManager.default.temporaryDirectory.appending(path: "notcher-screenshots-\(UUID().uuidString)", directoryHint: .isDirectory)
+        let dir = FileManager.default.temporaryDirectory.appending(path: "niche-screenshots-\(UUID().uuidString)", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         let url = try TestImage.write(TestImage.solid(width: 1200, height: 600), to: dir.appending(path: "wide.png"))
@@ -448,9 +448,9 @@ func eventually(_ condition: @MainActor () -> Bool) async throws {
 
 // MARK: - Snapshots
 
-/// Writes the page in each state to $TMPDIR/notcher-snapshots for visual review.
+/// Writes the page in each state to $TMPDIR/niche-snapshots for visual review.
 @MainActor @Suite struct SnapshotTests {
-    static let dir = FileManager.default.temporaryDirectory.appending(path: "notcher-snapshots", directoryHint: .isDirectory)
+    static let dir = FileManager.default.temporaryDirectory.appending(path: "niche-snapshots", directoryHint: .isDirectory)
 
     @Test func pages() async throws {
         let dormant = try Rig(); defer { dormant.cleanUp() }
@@ -501,7 +501,7 @@ struct ShotFolder {
     let url: URL
 
     init() throws {
-        url = FileManager.default.temporaryDirectory.appending(path: "notcher-shots-\(UUID().uuidString)", directoryHint: .isDirectory)
+        url = FileManager.default.temporaryDirectory.appending(path: "niche-shots-\(UUID().uuidString)", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
     }
 
@@ -560,7 +560,7 @@ struct ShotFolder {
     }
 
     @Test func aMissingFolderHasNoScreenshots() {
-        let nowhere = FileManager.default.temporaryDirectory.appending(path: "notcher-none-\(UUID().uuidString)")
+        let nowhere = FileManager.default.temporaryDirectory.appending(path: "niche-none-\(UUID().uuidString)")
         #expect(FolderScreenshotSource.scan(nowhere, since: since).isEmpty)
         #expect(FolderScreenshotSource.probe(nowhere) == .unknown)
     }
@@ -646,7 +646,7 @@ struct ShotFolder {
     }
 
     @Test func aFolderThatIsNotThereReportsNothing() async {
-        let nowhere = FileManager.default.temporaryDirectory.appending(path: "notcher-none-\(UUID().uuidString)")
+        let nowhere = FileManager.default.temporaryDirectory.appending(path: "niche-none-\(UUID().uuidString)")
         let source = FolderScreenshotSource(folder: { nowhere })
         var batches: [ScreenshotBatch] = []
         source.start { batches.append($0) }

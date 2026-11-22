@@ -40,7 +40,7 @@ struct ScreenshotsPage: View {
                 case .watching where shots.isEmpty && module.folderAccess == .denied:
                     StatusMessage(
                         symbol: "lock", title: "Allow access to the screenshot folder",
-                        message: "Privacy & Security › Files and Folders lists Notcher."
+                        message: "Privacy & Security › Files and Folders lists Niche."
                     ) {
                         HStack(spacing: Tokens.Spacing.s) {
                             GlassButton("Open Settings", symbol: "gear") { module.openPrivacySettings() }

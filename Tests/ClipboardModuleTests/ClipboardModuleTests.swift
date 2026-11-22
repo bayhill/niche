@@ -606,7 +606,7 @@ private let png = TestImage.data(TestImage.solid(width: 4, height: 3))
         adapter.write(.image(png, type: "public.png"))
         #expect(adapter.data(forType: "public.png") == png)
 
-        let file = URL(fileURLWithPath: "/tmp/notcher-test-file.txt")
+        let file = URL(fileURLWithPath: "/tmp/niche-test-file.txt")
         named.clearContents()
         named.writeObjects([file as NSURL])
         #expect(adapter.fileURLs() == [file])
@@ -618,7 +618,7 @@ private let png = TestImage.data(TestImage.solid(width: 4, height: 3))
 @MainActor @Suite struct ClipboardSnapshotTests {
     @Test func snapshots() async throws {
         let env = try TestEnvironment(); defer { env.cleanUp() }
-        let dir = ProcessInfo.processInfo.environment["NOTCHER_SNAPSHOT_DIR"].map { URL(fileURLWithPath: $0) } ?? env.root
+        let dir = ProcessInfo.processInfo.environment["NICHE_SNAPSHOT_DIR"].map { URL(fileURLWithPath: $0) } ?? env.root
 
         let sample = ClipboardModule.sample()
         await sample.start(env.context(for: .clipboard))

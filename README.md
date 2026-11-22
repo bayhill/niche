@@ -1,6 +1,6 @@
-# Notcher
+# Niche
 
-A native macOS app that lives in the MacBook notch. Drop images on the notch and they are converted to WebP next to
+A home for the MacBook notch: a native macOS app that lives in it. Drop images on the notch and they are converted to WebP next to
 the originals, using the last-used settings. Around that it keeps a few glanceable tools in one sheet of dark Liquid
 Glass.
 
@@ -27,18 +27,18 @@ The panel opens on the tab that was used last; a setting in General makes it alw
 ## Requirements
 
 - macOS 26 on a Mac with a notch. On a display without one, a virtual notch appears when there is something to
-  show (an activity, a drag, the hotkey) and is invisible otherwise. Notcher lives on one display at a time.
+  show (an activity, a drag, the hotkey) and is invisible otherwise. Niche lives on one display at a time.
 - The Xcode 26 or later command-line toolchain (Swift 6.2+). There is no Xcode project; everything builds with SwiftPM.
 
 ## Build and install
 
-    scripts/bundle.sh        # builds, signs and installs ~/Applications/Notcher.app
+    scripts/bundle.sh        # builds, signs and installs ~/Applications/Niche.app
     scripts/run.sh           # (re)starts the installed app
 
-`scripts/bundle.sh` quits a running Notcher and replaces the copy in `~/Applications`; `INSTALL=0 scripts/bundle.sh`
-only builds `build/Notcher.app`.
+`scripts/bundle.sh` quits a running Niche and replaces the copy in `~/Applications`; `INSTALL=0 scripts/bundle.sh`
+only builds `build/Niche.app`.
 
-`scripts/bundle.sh` signs with the identity named in `NOTCHER_SIGN_IDENTITY` (default `Notcher Local Signing`) and
+`scripts/bundle.sh` signs with the identity named in `NICHE_SIGN_IDENTITY` (default `Niche Local Signing`) and
 falls back to ad-hoc signing when that identity is not in the keychain. Ad-hoc builds work, but macOS treats every
 rebuild as a new app and asks again for Calendar, Automation and folder access. To avoid that, create a self-signed
 code-signing certificate once: Keychain Access → Certificate Assistant → Create a Certificate, type "Code Signing",
@@ -62,7 +62,7 @@ with the name above. The app is signed with the hardened runtime either way.
 | Desktop, Documents or Downloads folder | Screenshots is switched on, or a file there is converted | Listing recent screenshots; writing the WebP next to the original |
 | Pasting from other apps | Clipboard is switched on | Reading what was copied |
 
-None is needed for converting images dropped from a folder Notcher can already read.
+None is needed for converting images dropped from a folder Niche can already read.
 
 For development:
 
@@ -84,7 +84,7 @@ The debug flags are documented in `Sources/NotchCore/DebugOptions.swift`; `--pag
 | `Sources/NotchUI` | The notch window: shape, states, hover, drag and drop, the expanded panel |
 | `Sources/ImageEngine`, `Sources/webpify` | Decode, normalise and encode to WebP; the command-line tool |
 | `Sources/*Module` | One target per module; each depends on `NotchCore` only (`ConvertModule` also on `ImageEngine`) |
-| `Sources/NotcherApp` | The app: wires modules together, Settings, launch at login |
+| `Sources/NicheApp` | The app: wires modules together, Settings, launch at login |
 | `Sources/NotchCoreTesting`, `Sources/NotchPlayground` | Fakes and off-screen rendering for tests; the notch layer as a stand-alone program |
 | `Tests` | One test target per source target (Swift Testing) |
 | `Resources`, `scripts` | `Info.plist`, entitlements and icon; build, run and smoke-test scripts |
@@ -95,7 +95,7 @@ The debug flags are documented in `Sources/NotchCore/DebugOptions.swift`; `--pag
 
 ## Privacy
 
-Notcher has no telemetry and no accounts. It makes two kinds of network request, both optional: when Now Playing
+Niche has no telemetry and no accounts. It makes two kinds of network request, both optional: when Now Playing
 falls back to AppleScript for Spotify, it downloads the album artwork from the address Spotify reports (over https,
 without keeping a copy on disk); and when
 Builds is switched on, it runs the GitHub CLI (`gh run list`) for the repositories added in Settings.
@@ -118,13 +118,13 @@ What it reads:
 
 What it changes on the Mac:
 
-- Settings in macOS preferences (`dev.bayhill.notcher`).
-- `~/Library/Application Support/Notcher`: the Shelf's list of file references, colour picks, and, with Claude Code
+- Settings in macOS preferences (`dev.bayhill.niche`).
+- `~/Library/Application Support/Niche`: the Shelf's list of file references, colour picks, and, with Claude Code
   alerts on, the plugin copy, an event folder and up to three backups of `~/.claude/settings.json`.
-- `~/Library/Caches/Notcher`: reserved for things that can be rebuilt; empty today.
+- `~/Library/Caches/Niche`: reserved for things that can be rebuilt; empty today.
 - Converted images, next to the originals. A file dragged from an app that only promises it (Mail, Photos, a
   browser) is saved to `~/Downloads` first and converted there.
-- With launch at login on: a login item, or `~/Library/LaunchAgents/dev.bayhill.notcher.login.plist` when macOS
+- With launch at login on: a login item, or `~/Library/LaunchAgents/dev.bayhill.niche.login.plist` when macOS
   refuses a login item for a locally signed app.
 - A global hotkey, ⌃⌥N, which can be switched off in Settings › General.
 
@@ -132,10 +132,10 @@ What it changes on the Mac:
 
 1. Switch off Claude Code alerts in Settings if they were on (this removes the plugin from Claude Code), and launch
    at login.
-2. Quit Notcher and delete `~/Applications/Notcher.app`.
-3. Delete `~/Library/Application Support/Notcher`, `~/Library/Caches/Notcher` and, if it exists,
-   `~/Library/LaunchAgents/dev.bayhill.notcher.login.plist`.
-4. `defaults delete dev.bayhill.notcher` removes the settings, and `tccutil reset All dev.bayhill.notcher` the
+2. Quit Niche and delete `~/Applications/Niche.app`.
+3. Delete `~/Library/Application Support/Niche`, `~/Library/Caches/Niche` and, if it exists,
+   `~/Library/LaunchAgents/dev.bayhill.niche.login.plist`.
+4. `defaults delete dev.bayhill.niche` removes the settings, and `tccutil reset All dev.bayhill.niche` the
    permissions.
 
 ## Caveats
@@ -144,7 +144,7 @@ What it changes on the Mac:
   [mediaremote-adapter](https://github.com/ungive/mediaremote-adapter). It can stop working with a macOS update, and
   it rules out the Mac App Store. Spotify and Music have an AppleScript fallback.
 - The app is not sandboxed and not notarised. It is built to be compiled and run on your own Mac.
-- Notcher is an independent project. It is not affiliated with or endorsed by Apple, Anthropic, GitHub, Microsoft,
+- Niche is an independent project. It is not affiliated with or endorsed by Apple, Anthropic, GitHub, Microsoft,
   Zoom, Google, Cisco or Spotify, whose products it works alongside.
 
 ## Licence

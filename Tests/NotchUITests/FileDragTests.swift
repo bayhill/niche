@@ -133,7 +133,7 @@ struct FileDragTests {
 
     @Test func theHintMentionsDraggingWhenThereAreFiles() {
         #expect(HoverHint.text(hasFiles: true) == "Drag out, or click to expand")
-        #expect(HoverHint.text(hasFiles: false) == "Click to expand Notcher")
-        #expect(HoverHint.text == "Click to expand Notcher")
+        #expect(HoverHint.text(hasFiles: false) == "Click to expand Niche")
+        #expect(HoverHint.text == "Click to expand Niche")
     }
 }

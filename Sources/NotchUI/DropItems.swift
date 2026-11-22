@@ -35,7 +35,7 @@ public enum DropItems {
     /// A stand-in URL for a promised file that has not been written yet; only its extension is meaningful.
     static func promisePlaceholder(receiver: Int, file: Int, type identifier: String) -> URL {
         let ext = UTType(identifier)?.preferredFilenameExtension ?? "data"
-        return URL(fileURLWithPath: NSTemporaryDirectory()).appending(path: "notcher-promised-\(receiver)-\(file).\(ext)")
+        return URL(fileURLWithPath: NSTemporaryDirectory()).appending(path: "niche-promised-\(receiver)-\(file).\(ext)")
     }
 }
 
@@ -115,7 +115,7 @@ enum DragPasteboard {
 enum FilePromises {
     private static let queue: OperationQueue = {
         let q = OperationQueue()
-        q.name = "notcher.file-promises"
+        q.name = "niche.file-promises"
         q.qualityOfService = .userInitiated
         return q
     }()

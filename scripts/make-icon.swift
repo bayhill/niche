@@ -1,4 +1,4 @@
-// Draws the Notcher app icon and writes a 1024×1024 PNG.  Usage: swift scripts/make-icon.swift <out.png>
+// Draws the Niche app icon and writes a 1024×1024 PNG.  Usage: swift scripts/make-icon.swift <out.png>
 import AppKit
 
 let size: CGFloat = 1024

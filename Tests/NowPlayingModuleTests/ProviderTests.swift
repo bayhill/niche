@@ -216,12 +216,12 @@ private let locations = AdapterLocations(
     }
 }
 
-/// Runs only when NOTCHER_ADAPTER_DIR points at a `build.sh` output. Reads now-playing state; never sends commands.
+/// Runs only when NICHE_ADAPTER_DIR points at a `build.sh` output. Reads now-playing state; never sends commands.
 @MainActor
-@Suite(.enabled(if: ProcessInfo.processInfo.environment["NOTCHER_ADAPTER_DIR"] != nil))
+@Suite(.enabled(if: ProcessInfo.processInfo.environment["NICHE_ADAPTER_DIR"] != nil))
 struct RealAdapterTests {
     @Test func selfTestAndStream() async throws {
-        let dir = URL(filePath: try #require(ProcessInfo.processInfo.environment["NOTCHER_ADAPTER_DIR"]))
+        let dir = URL(filePath: try #require(ProcessInfo.processInfo.environment["NICHE_ADAPTER_DIR"]))
         let loc = AdapterLocations(script: dir.appending(path: "mediaremote-adapter.pl"), framework: dir.appending(path: "MediaRemoteAdapter.framework"))
         #expect(await AdapterProvider.selfTest(loc) == .passed)
         let provider = AdapterProvider(locations: loc)

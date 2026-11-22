@@ -64,7 +64,7 @@ public enum ClaudeActivity {
 
     /// `.attention` while any session needs the user; a short `.passive` confirmation right after a session
     /// finishes; otherwise `nil`. With `showNames`, the wings name the session and what it wants
-    /// ("notcher" · "Allow Bash", or the longest-waiting session · "3 sessions"); without, the activity is the
+    /// ("niche" · "Allow Bash", or the longest-waiting session · "3 sessions"); without, the activity is the
     /// original glyph-only one. The `id` depends only on the condition, so the wing animates in place.
     public static func make(for sessions: [ClaudeSession], now: Date, showNames: Bool = true) -> LiveActivity? {
         let waiting = SessionReducer.ordered(sessions.filter(\.state.needsUser))
@@ -141,11 +141,11 @@ public enum ClaudeActivity {
 /// Whether alerts are on, combining the user's choice (`ClaudeAgentsModule.alertsEnabled`) with what Claude Code
 /// has registered.
 public enum AlertsState: Sendable, Equatable {
-    /// Enabled and registered: events flow while Notcher runs.
+    /// Enabled and registered: events flow while Niche runs.
     case on
     /// Not registered in Claude Code.
     case off
-    /// Switched off in Notcher, but Claude Code still lists the plugin (a removal failed, or it was installed
+    /// Switched off in Niche, but Claude Code still lists the plugin (a removal failed, or it was installed
     /// before this setting existed). Nothing is collected: the spool folder does not exist.
     case offStillRegistered
     /// Not registered and no `claude` executable to register it with.

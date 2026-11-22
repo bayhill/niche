@@ -67,7 +67,7 @@ import Testing
 }
 
 @Suite struct ForwardScriptTests {
-    static let pluginRoot = Fixture.repoRoot.appending(path: "Support/ClaudePlugin/plugins/notcher-bridge")
+    static let pluginRoot = Fixture.repoRoot.appending(path: "Support/ClaudePlugin/plugins/niche-bridge")
     let script = pluginRoot.appending(path: "scripts/forward.sh")
 
     /// The exact command string from hooks.json.
@@ -103,7 +103,7 @@ import Testing
 
     func makeSpool() throws -> (home: URL, spool: URL) {
         let home = try Fixture.tempDir("home")
-        let spool = home.appending(path: "Library/Application Support/Notcher/claude-events")
+        let spool = home.appending(path: "Library/Application Support/Niche/claude-events")
         try FileManager.default.createDirectory(at: spool, withIntermediateDirectories: true)
         return (home, spool)
     }
@@ -209,7 +209,7 @@ import Testing
         #expect(command == #"/bin/bash "${CLAUDE_PLUGIN_ROOT}/scripts/forward.sh""#)
         let (home, spool) = try makeSpool()
         defer { try? FileManager.default.removeItem(at: home) }
-        let pluginCopy = home.appending(path: "Application Support/claude-plugin/plugins/notcher-bridge")
+        let pluginCopy = home.appending(path: "Application Support/claude-plugin/plugins/niche-bridge")
         try FileManager.default.createDirectory(at: pluginCopy.deletingLastPathComponent(), withIntermediateDirectories: true)
         try FileManager.default.copyItem(at: Self.pluginRoot, to: pluginCopy)
         let marker = home.appending(path: "pwned")
@@ -245,7 +245,7 @@ import Testing
         #expect(market["name"] as? String == HookInstaller.marketplace)
         let plugins = try #require(market["plugins"] as? [[String: Any]])
         #expect(plugins.first?["name"] as? String == HookInstaller.plugin)
-        let hooks = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: root.appending(path: "plugins/notcher-bridge/hooks/hooks.json"))) as? [String: Any])
+        let hooks = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: root.appending(path: "plugins/niche-bridge/hooks/hooks.json"))) as? [String: Any])
         let events = try #require(hooks["hooks"] as? [String: [[String: Any]]])
         #expect(Set(events.keys) == ["SessionStart", "UserPromptSubmit", "PermissionRequest", "PostToolUse", "PostToolUseFailure", "Notification", "Stop", "StopFailure", "SessionEnd"])
         let handlers = events.values.flatMap { $0 }.flatMap { ($0["hooks"] as? [[String: Any]]) ?? [] }

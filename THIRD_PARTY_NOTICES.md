@@ -1,6 +1,6 @@
 # Third-party notices
 
-Notcher is released under the MIT licence (see `LICENSE`). It includes or links the following third-party software.
+Niche is released under the MIT licence (see `LICENSE`). It includes or links the following third-party software.
 
 ## libwebp
 

@@ -29,8 +29,8 @@ public struct SystemProcessRunner: ProcessRunning {
 
     public func run(_ executable: URL, arguments: [String], environment: [String: String]) async throws -> ProcessResult {
         let fm = FileManager.default
-        let outURL = fm.temporaryDirectory.appending(path: "notcher-run-\(UUID().uuidString).out")
-        let errURL = fm.temporaryDirectory.appending(path: "notcher-run-\(UUID().uuidString).err")
+        let outURL = fm.temporaryDirectory.appending(path: "niche-run-\(UUID().uuidString).out")
+        let errURL = fm.temporaryDirectory.appending(path: "niche-run-\(UUID().uuidString).err")
         fm.createFile(atPath: outURL.path, contents: nil)
         fm.createFile(atPath: errURL.path, contents: nil)
         defer { try? fm.removeItem(at: outURL); try? fm.removeItem(at: errURL) }
@@ -133,15 +133,15 @@ public protocol HookInstalling: Sendable {
 
 // MARK: - Installer
 
-/// Installs the `notcher-bridge` plugin into the user's Claude Code configuration via the `claude` CLI, only when
+/// Installs the `niche-bridge` plugin into the user's Claude Code configuration via the `claude` CLI, only when
 /// asked. Paths and the process runner are injected; nothing here runs on its own.
 public struct HookInstaller: HookInstalling {
-    public static let marketplace = "notcher-local"
-    public static let plugin = "notcher-bridge"
+    public static let marketplace = "niche-local"
+    public static let plugin = "niche-bridge"
     public static var pluginID: String { "\(plugin)@\(marketplace)" }
 
     public struct Paths: Sendable, Equatable {
-        /// `Notcher.app/Contents/Resources/ClaudePlugin` (the marketplace root). `nil` outside the app bundle.
+        /// `Niche.app/Contents/Resources/ClaudePlugin` (the marketplace root). `nil` outside the app bundle.
         public var bundledPlugin: URL?
         /// Stable copy that Claude Code loads in place: `<appSupport>/claude-plugin`.
         public var installedPlugin: URL
@@ -234,7 +234,7 @@ public struct HookInstaller: HookInstalling {
                 "Copy the plugin from the app to \(paths.installedPlugin.path)",
                 "Back up \(paths.claudeSettings.path) to \(paths.backups.appending(path: fileName).path)",
                 "Run the two commands below (if the second fails, the first is undone)",
-                "While Notcher runs with alerts on, keep \(paths.spool.path) for the plugin to drop events in",
+                "While Niche runs with alerts on, keep \(paths.spool.path) for the plugin to drop events in",
             ],
             uninstallSteps: [
                 "Turn alerts off and remove \(paths.spool.path) (nothing more is collected)",
@@ -262,7 +262,7 @@ public struct HookInstaller: HookInstalling {
         guard let source = paths.bundledPlugin,
               FileManager.default.fileExists(atPath: source.appending(path: ".claude-plugin/marketplace.json").path)
         else {
-            return InstallResult(succeeded: false, message: "The plugin is missing from the app bundle. Reinstall Notcher and try again.")
+            return InstallResult(succeeded: false, message: "The plugin is missing from the app bundle. Reinstall Niche and try again.")
         }
         let backup: URL?
         do {
@@ -281,7 +281,7 @@ public struct HookInstaller: HookInstalling {
         if let install = await run(commands[1], log: &log), install.status == 0 || Self.alreadyPresent(install) {
             return InstallResult(
                 succeeded: true,
-                message: "Alerts are on. New sessions report to Notcher; run /reload-plugins in sessions that are already open.\(note)",
+                message: "Alerts are on. New sessions report to Niche; run /reload-plugins in sessions that are already open.\(note)",
                 log: log
             )
         }

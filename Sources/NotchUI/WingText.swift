@@ -91,7 +91,7 @@ public enum WingText {
 /// Keeps the right wing clear of menu-bar status items.
 ///
 /// The left side has no equivalent: the extent of the frontmost app's menus can only be read through Accessibility,
-/// which Notcher does not use, so the left wing is limited only by `wingMaxWidth` and the screen edge.
+/// which Niche does not use, so the left wing is limited only by `wingMaxWidth` and the screen edge.
 public enum StatusItemClearance {
     /// `kCGStatusWindowLevel`.
     public static let statusItemLayer = 25
@@ -111,9 +111,9 @@ public enum StatusItemClearance {
     }
 }
 
-/// The "Click to expand Notcher" line shown below the notch while it swells on hover.
+/// The "Click to expand Niche" line shown below the notch while it swells on hover.
 public enum HoverHint {
-    public static let text = "Click to expand Notcher"
+    public static let text = "Click to expand Niche"
     /// When the activity carries files that can be dragged out of the bar.
     public static let dragText = "Drag out, or click to expand"
 

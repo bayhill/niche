@@ -78,7 +78,7 @@ public struct ScriptError: Error, Sendable, Equatable {
 }
 
 /// `osascript` as a child process: off the main thread, with a timeout, and the Automation prompt is attributed to
-/// Notcher (the responsible process).
+/// Niche (the responsible process).
 public struct OsascriptRunner: ScriptRunning {
     private let launcher: any ProcessLaunching
     public init(launcher: any ProcessLaunching = FoundationProcessLauncher()) { self.launcher = launcher }

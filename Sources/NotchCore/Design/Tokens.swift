@@ -118,7 +118,7 @@ public enum PanelLayout {
     /// Gap kept between a wing's outer edge and the nearest menu-bar status item.
     public static let wingClearance: CGFloat = 10
     /// How much the notch swells on hover: slightly wider, and tall enough below the hardware notch for the
-    /// one-line hover hint ("Click to expand Notcher").
+    /// one-line hover hint ("Click to expand Niche").
     public static let hoverGrowth = CGSize(width: 16, height: 22)
     /// The hover swell when no hint is shown (hover already opens the panel).
     public static let hoverGrowthCompact = CGSize(width: 12, height: 6)

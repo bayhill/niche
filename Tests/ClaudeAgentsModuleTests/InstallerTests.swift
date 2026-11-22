@@ -47,11 +47,11 @@ import Testing
         #expect(plan.cli == s.cli)
         #expect(plan.installCommands == [
             PlannedCommand(executable: s.cli, arguments: ["plugin", "marketplace", "add", pluginDir, "--scope", "user"]),
-            PlannedCommand(executable: s.cli, arguments: ["plugin", "install", "notcher-bridge@notcher-local", "--scope", "user"]),
+            PlannedCommand(executable: s.cli, arguments: ["plugin", "install", "niche-bridge@niche-local", "--scope", "user"]),
         ])
         #expect(plan.uninstallCommands.map(\.arguments) == [
-            ["plugin", "uninstall", "notcher-bridge@notcher-local", "--scope", "user"],
-            ["plugin", "marketplace", "remove", "notcher-local", "--scope", "user"],
+            ["plugin", "uninstall", "niche-bridge@niche-local", "--scope", "user"],
+            ["plugin", "marketplace", "remove", "niche-local", "--scope", "user"],
         ])
         #expect(plan.settingsBefore == """
         {
@@ -64,10 +64,10 @@ import Testing
         {
           "enabledPlugins" : {
             "formatter@team-tools" : true,
-            "notcher-bridge@notcher-local" : true
+            "niche-bridge@niche-local" : true
           },
           "extraKnownMarketplaces" : {
-            "notcher-local" : {
+            "niche-local" : {
               "source" : {
                 "path" : "\(pluginDir)",
                 "source" : "directory"
@@ -96,7 +96,7 @@ import Testing
 
         let fm = FileManager.default
         #expect(fm.fileExists(atPath: s.paths.installedPlugin.appending(path: ".claude-plugin/marketplace.json").path))
-        #expect(fm.isExecutableFile(atPath: s.paths.installedPlugin.appending(path: "plugins/notcher-bridge/scripts/forward.sh").path))
+        #expect(fm.isExecutableFile(atPath: s.paths.installedPlugin.appending(path: "plugins/niche-bridge/scripts/forward.sh").path))
         #expect(!fm.fileExists(atPath: s.paths.spool.path), "the module creates the spool, only with alerts enabled")
         let backups = try fm.contentsOfDirectory(atPath: s.paths.backups.path)
         #expect(backups.count == 1 && backups[0].hasPrefix("settings-") && backups[0].hasSuffix(".json"))
@@ -132,7 +132,7 @@ import Testing
         #expect(result.message.contains(kept.path))
         #expect(installer.status() == .notInstalled)
         let settings = try s.settingsObject()
-        #expect((settings["enabledPlugins"] as? [String: Any])?["notcher-bridge@notcher-local"] == nil)
+        #expect((settings["enabledPlugins"] as? [String: Any])?["niche-bridge@niche-local"] == nil)
         #expect((settings["enabledPlugins"] as? [String: Any])?["formatter@team-tools"] as? Bool == true)
     }
 
@@ -160,21 +160,21 @@ import Testing
         #expect(result.log.contains { $0.contains("exit 1") && $0.contains("boom") })
         let calls = await runner.calls.map(\.arguments)
         #expect(calls.first == ["plugin", "marketplace", "add", s.paths.installedPlugin.path, "--scope", "user"])
-        #expect(calls.last == ["plugin", "marketplace", "remove", "notcher-local", "--scope", "user"])
+        #expect(calls.last == ["plugin", "marketplace", "remove", "niche-local", "--scope", "user"])
         let settings = try s.settingsObject()
-        #expect((settings["extraKnownMarketplaces"] as? [String: Any])?["notcher-local"] == nil, "no marketplace entry left behind")
+        #expect((settings["extraKnownMarketplaces"] as? [String: Any])?["niche-local"] == nil, "no marketplace entry left behind")
         #expect(installer.status() == .notInstalled)
         #expect(!FileManager.default.fileExists(atPath: s.paths.spool.path))
     }
 
     @Test func retryAfterPartialInstallSucceeds() async throws {
-        let s = try Setup(settingsJSON: #"{"extraKnownMarketplaces":{"notcher-local":{"source":{"source":"directory","path":"/x"}}}}"#)
+        let s = try Setup(settingsJSON: #"{"extraKnownMarketplaces":{"niche-local":{"source":{"source":"directory","path":"/x"}}}}"#)
         defer { s.cleanUp() }
         let installer = s.installer(RecordingRunner(settings: s.settings))
         let result = await installer.install()
         #expect(result.succeeded)
         #expect(installer.status() == .installed)
-        #expect(HookInstaller.alreadyPresent(ProcessResult(status: 1, stderr: "Marketplace 'notcher-local' already exists")))
+        #expect(HookInstaller.alreadyPresent(ProcessResult(status: 1, stderr: "Marketplace 'niche-local' already exists")))
         #expect(HookInstaller.alreadyPresent(ProcessResult(status: 0, stdout: "Plugin \"x\" is already installed (scope: user)")))
         #expect(!HookInstaller.alreadyPresent(ProcessResult(status: 1, stderr: "boom")))
     }
@@ -197,7 +197,7 @@ import Testing
     }
 
     @Test func uninstallWithoutCLIStillSilencesAndSaysWhatIsLeft() async throws {
-        let s = try Setup(withCLI: false, settingsJSON: #"{"enabledPlugins":{"notcher-bridge@notcher-local":true},"extraKnownMarketplaces":{"notcher-local":{"source":{"source":"directory","path":"/x"}}}}"#)
+        let s = try Setup(withCLI: false, settingsJSON: #"{"enabledPlugins":{"niche-bridge@niche-local":true},"extraKnownMarketplaces":{"niche-local":{"source":{"source":"directory","path":"/x"}}}}"#)
         defer { s.cleanUp() }
         try FileManager.default.createDirectory(at: s.paths.spool, withIntermediateDirectories: true)
         let installer = s.installer(RecordingRunner(settings: s.settings))
@@ -217,7 +217,7 @@ import Testing
         let runner = RecordingRunner(settings: s.settings)
         let installer = s.installer(runner)
         _ = await installer.install()
-        let script = s.paths.installedPlugin.appending(path: "plugins/notcher-bridge/scripts/forward.sh")
+        let script = s.paths.installedPlugin.appending(path: "plugins/niche-bridge/scripts/forward.sh")
         try Data("old".utf8).write(to: script)
         installer.prepare()
         #expect(HookInstaller.sameContents(s.paths.bundledPlugin!, s.paths.installedPlugin))

@@ -1,6 +1,6 @@
 import Foundation
 
-/// One Claude Code hook event, as forwarded by the `notcher-bridge` plugin.
+/// One Claude Code hook event, as forwarded by the `niche-bridge` plugin.
 public struct HookEvent: Sendable, Equatable {
     public enum Kind: Sendable, Equatable {
         /// `source`: startup, resume, clear, compact, fork.

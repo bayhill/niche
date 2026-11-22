@@ -1,9 +1,9 @@
-# Contributing to Notcher
+# Contributing to Niche
 
-Notcher is a SwiftPM-only macOS 26 app (Swift 6 language mode, no Xcode project). `scripts/bundle.sh` assembles,
-signs and installs `Notcher.app`; `scripts/run.sh [flags]` restarts it. Both act on the copy in `~/Applications`:
-`bundle.sh` quits a running Notcher and replaces the installed app (`INSTALL=0 scripts/bundle.sh` only builds
-`build/Notcher.app`).
+Niche is a SwiftPM-only macOS 26 app (Swift 6 language mode, no Xcode project). `scripts/bundle.sh` assembles,
+signs and installs `Niche.app`; `scripts/run.sh [flags]` restarts it. Both act on the copy in `~/Applications`:
+`bundle.sh` quits a running Niche and replaces the installed app (`INSTALL=0 scripts/bundle.sh` only builds
+`build/Niche.app`).
 
 ## Changes and reports
 
@@ -21,7 +21,7 @@ place it is defined), or the two copies share preferences and permissions.
 
 `Sources/NotchCore` is the contract and the design kit. `Sources/NotchUI` is the notch window. Each `Sources/*Module`
 target is one feature and depends on `NotchCore` only (`ConvertModule` also on `ImageEngine`); modules never import
-each other and talk through the service protocols in `NotchCore`. `Sources/NotcherApp` wires everything together. The README has the full table.
+each other and talk through the service protocols in `NotchCore`. `Sources/NicheApp` wires everything together. The README has the full table.
 
 A change to one module should stay inside that module's target and its tests. If the contract in `NotchCore` is
 wrong or missing something, change it there, deliberately, rather than working around it with a private copy.

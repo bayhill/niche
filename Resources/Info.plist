@@ -3,11 +3,11 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDevelopmentRegion</key><string>en</string>
-	<key>CFBundleExecutable</key><string>Notcher</string>
-	<key>CFBundleIdentifier</key><string>dev.bayhill.notcher</string>
+	<key>CFBundleExecutable</key><string>Niche</string>
+	<key>CFBundleIdentifier</key><string>dev.bayhill.niche</string>
 	<key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
-	<key>CFBundleName</key><string>Notcher</string>
-	<key>CFBundleDisplayName</key><string>Notcher</string>
+	<key>CFBundleName</key><string>Niche</string>
+	<key>CFBundleDisplayName</key><string>Niche</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
 	<key>CFBundleShortVersionString</key><string>0.1.0</string>
 	<key>CFBundleVersion</key><string>__BUILD__</string>
@@ -20,10 +20,10 @@
 	<key>NSHighResolutionCapable</key><true/>
 	<key>NSSupportsAutomaticTermination</key><false/>
 	<key>NSSupportsSuddenTermination</key><false/>
-	<key>NSCalendarsFullAccessUsageDescription</key><string>Notcher shows your next meeting beside the notch and lets you join it with one click.</string>
-	<key>NSDesktopFolderUsageDescription</key><string>Notcher shows your recent screenshots in the notch so you can drag them out, convert them or put them on the shelf.</string>
-	<key>NSDocumentsFolderUsageDescription</key><string>Notcher shows your recent screenshots in the notch so you can drag them out, convert them or put them on the shelf.</string>
-	<key>NSDownloadsFolderUsageDescription</key><string>Notcher shows your recent screenshots in the notch so you can drag them out, convert them or put them on the shelf.</string>
-	<key>NSAppleEventsUsageDescription</key><string>Notcher asks Spotify and Music what is playing so it can show the track and its controls in the notch.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key><string>Niche shows your next meeting beside the notch and lets you join it with one click.</string>
+	<key>NSDesktopFolderUsageDescription</key><string>Niche shows your recent screenshots in the notch so you can drag them out, convert them or put them on the shelf.</string>
+	<key>NSDocumentsFolderUsageDescription</key><string>Niche shows your recent screenshots in the notch so you can drag them out, convert them or put them on the shelf.</string>
+	<key>NSDownloadsFolderUsageDescription</key><string>Niche shows your recent screenshots in the notch so you can drag them out, convert them or put them on the shelf.</string>
+	<key>NSAppleEventsUsageDescription</key><string>Niche asks Spotify and Music what is playing so it can show the track and its controls in the notch.</string>
 </dict>
 </plist>

@@ -8,7 +8,7 @@ import Testing
 @MainActor
 @Suite("Nudge")
 struct NudgeTests {
-    static let dir = FileManager.default.temporaryDirectory.appending(path: "notcher-snapshots", directoryHint: .isDirectory)
+    static let dir = FileManager.default.temporaryDirectory.appending(path: "niche-snapshots", directoryHint: .isDirectory)
 
     @Test func openingTheNudgeSpringsOpenAndMovingBetweenOpenStatesMorphs() {
         #expect(NotchController.animation(from: .closed, to: .nudge) == Motion.open)
@@ -27,7 +27,7 @@ struct NudgeTests {
         #expect(NotchState.nudge.isOpen)
     }
 
-    /// Writes the nudge card to $TMPDIR/notcher-snapshots for visual review: the sample, a title far too long for
+    /// Writes the nudge card to $TMPDIR/niche-snapshots for visual review: the sample, a title far too long for
     /// the card, and one without an action button or countdown.
     @Test func snapshots() throws {
         let now = Date.now

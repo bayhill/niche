@@ -372,9 +372,9 @@ private func activity(_ id: String, _ p: LiveActivity.Priority, updated: TimeInt
 
     @Test func passesTheEnvironmentGiven() async {
         let result = await ProcessCommandRunner().run(
-            URL(fileURLWithPath: "/usr/bin/env"), arguments: [], environment: ["NOTCHER_TEST": "1"], timeout: .seconds(5)
+            URL(fileURLWithPath: "/usr/bin/env"), arguments: [], environment: ["NICHE_TEST": "1"], timeout: .seconds(5)
         )
-        #expect(result.text == "NOTCHER_TEST=1\n")
+        #expect(result.text == "NICHE_TEST=1\n")
     }
 
     @Test func stopsACommandThatRunsTooLong() async {

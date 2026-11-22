@@ -1,7 +1,7 @@
 #!/bin/bash
-# Notcher bridge: hands one Claude Code hook event (JSON on stdin) to the Notcher app.
+# Niche bridge: hands one Claude Code hook event (JSON on stdin) to the Niche app.
 #
-# Privacy: only the fields Notcher reads are written to disk, each cut to 200 characters:
+# Privacy: only the fields Niche reads are written to disk, each cut to 200 characters:
 #   every event:                                  session_id, hook_event_name, cwd, session_title
 #   PermissionRequest, PostToolUse(Failure):      tool_name
 #   Notification:                                 notification_type, message
@@ -10,11 +10,11 @@
 # is kept for StopFailure alone). The JSON is read with /usr/bin/plutil (ships with macOS), held in memory, and the
 # reduced event is built as a property list and converted to JSON by plutil, so escaping is always valid.
 #
-# Prints nothing, always exits 0, never interprets stdin as code. Does nothing unless Notcher's spool folder exists
-# (Notcher running with alerts on), and nothing when the folder already holds more than 50 events (not drained).
+# Prints nothing, always exits 0, never interprets stdin as code. Does nothing unless Niche's spool folder exists
+# (Niche running with alerts on), and nothing when the folder already holds more than 50 events (not drained).
 exec >/dev/null 2>&1
 export LC_ALL=en_US.UTF-8
-spool="$HOME/Library/Application Support/Notcher/claude-events"
+spool="$HOME/Library/Application Support/Niche/claude-events"
 plutil=/usr/bin/plutil
 if [ ! -d "$spool" ] || [ ! -x "$plutil" ]; then
   cat >/dev/null

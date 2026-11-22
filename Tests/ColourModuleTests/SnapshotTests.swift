@@ -4,10 +4,10 @@ import NotchCore
 import NotchCoreTesting
 import Testing
 
-/// Writes the page in each state to $TMPDIR/notcher-snapshots for visual review.
+/// Writes the page in each state to $TMPDIR/niche-snapshots for visual review.
 @MainActor
 @Suite struct SnapshotTests {
-    static let dir = FileManager.default.temporaryDirectory.appending(path: "notcher-snapshots", directoryHint: .isDirectory)
+    static let dir = FileManager.default.temporaryDirectory.appending(path: "niche-snapshots", directoryHint: .isDirectory)
 
     @MainActor private final class NoSampler: ColourSampling {
         func sample() async -> Colour? { nil }

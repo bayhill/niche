@@ -57,9 +57,9 @@ public final class AppServices {
 
 /// Filesystem roots. Injected so tests can point everything at a temporary directory.
 public struct AppDirectories: Sendable, Equatable {
-    /// `~/Library/Application Support/Notcher` in the app.
+    /// `~/Library/Application Support/Niche` in the app.
     public var appSupport: URL
-    /// `~/Library/Caches/Notcher` in the app.
+    /// `~/Library/Caches/Niche` in the app.
     public var caches: URL
     /// `~/Downloads` in the app. Destination for outputs that have no source folder.
     public var downloads: URL
@@ -74,8 +74,8 @@ public struct AppDirectories: Sendable, Equatable {
         let fm = FileManager.default
         let home = fm.homeDirectoryForCurrentUser
         return AppDirectories(
-            appSupport: home.appending(path: "Library/Application Support/Notcher", directoryHint: .isDirectory),
-            caches: home.appending(path: "Library/Caches/Notcher", directoryHint: .isDirectory),
+            appSupport: home.appending(path: "Library/Application Support/Niche", directoryHint: .isDirectory),
+            caches: home.appending(path: "Library/Caches/Niche", directoryHint: .isDirectory),
             downloads: home.appending(path: "Downloads", directoryHint: .isDirectory),
             home: home
         )
@@ -112,7 +112,7 @@ public final class ModuleContext {
 public enum Log {
     /// The app's bundle identifier, as written in `Resources/Info.plist` (a test keeps the two equal).
     /// Also the log subsystem and the prefix for anything else that needs a reverse-DNS name.
-    public static let subsystem = "dev.bayhill.notcher"
+    public static let subsystem = "dev.bayhill.niche"
     public static func logger(_ category: String) -> Logger { Logger(subsystem: subsystem, category: category) }
     public static func logger(for module: ModuleID) -> Logger { logger(module.rawValue) }
 }

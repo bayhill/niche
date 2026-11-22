@@ -197,7 +197,7 @@ final class RecordingActivator: SessionActivating {
     }
 
     @Test func snapshots() throws {
-        let out = FileManager.default.temporaryDirectory.appending(path: "notcher-claude-snapshots", directoryHint: .isDirectory)
+        let out = FileManager.default.temporaryDirectory.appending(path: "niche-claude-snapshots", directoryHint: .isDirectory)
         let sample = ClaudeAgentsModule.sample()
         let card = try ViewSnapshot.write(module: sample, to: out.appending(path: "card-many-off.png"))
         let now = Date()
@@ -206,9 +206,9 @@ final class RecordingActivator: SessionActivating {
                           since: now.addingTimeInterval(-ago), lastEvent: now.addingTimeInterval(-ago))
         }
         let cases: [(String, [ClaudeSession], HookInstallStatus)] = [
-            ("card-two-need-user", [s("notcher", .needsPermission(detail: "Bash"), ago: 95), s("fix-login-redirect-after-oauth", .needsInput(detail: nil), ago: 400)], .installed),
+            ("card-two-need-user", [s("niche", .needsPermission(detail: "Bash"), ago: 95), s("fix-login-redirect-after-oauth", .needsInput(detail: nil), ago: 400)], .installed),
             ("card-one-working", [s("lanternfly", .working, ago: 380)], .installed),
-            ("card-many", [s("notcher", .needsPermission(detail: "Bash"), ago: 95), s("lanternfly", .working, ago: 380),
+            ("card-many", [s("niche", .needsPermission(detail: "Bash"), ago: 95), s("lanternfly", .working, ago: 380),
                            s("garden-clock", .finished(at: now.addingTimeInterval(-40)), ago: 40), s("dotfiles", .idle(since: now), ago: 3900)], .installed),
             ("card-empty", [], .notInstalled),
             ("card-hooks-off", [s("lanternfly", .working, ago: 380), s("dotfiles", .idle(since: now), ago: 3900)], .notInstalled),

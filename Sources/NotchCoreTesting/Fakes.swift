@@ -91,7 +91,7 @@ public struct TestEnvironment {
     public let playback = RecordingPlayback()
 
     public init() throws {
-        root = FileManager.default.temporaryDirectory.appending(path: "notcher-tests-\(UUID().uuidString)", directoryHint: .isDirectory)
+        root = FileManager.default.temporaryDirectory.appending(path: "niche-tests-\(UUID().uuidString)", directoryHint: .isDirectory)
         directories = .rooted(at: root)
         for dir in [directories.appSupport, directories.caches, directories.downloads, directories.home] {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)

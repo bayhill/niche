@@ -67,7 +67,7 @@ public enum NotchEvent: Sendable, Equatable {
     case dropTargetEntered, dropTargetExited
     /// The drop was delivered to us (check `acceptsDrop(now:)` first).
     case dropped
-    /// The user started / finished dragging the activity's files out of the bar (a Notcher-originated drag).
+    /// The user started / finished dragging the activity's files out of the bar (a Niche-originated drag).
     case ownDragBegan
     /// `accepted`: the drag ended with a non-empty operation (the files landed somewhere).
     case ownDragEnded(accepted: Bool)

@@ -231,11 +231,11 @@ import Testing
     }
 
     @Test func attentionWhenAnyoneWaits() throws {
-        let one = try #require(ClaudeActivity.make(for: [session("a", "notcher", .needsPermission(detail: "Bash"), since: -20), session("b", "x", .working, since: -5)], now: now, showNames: false))
+        let one = try #require(ClaudeActivity.make(for: [session("a", "storefront", .needsPermission(detail: "Bash"), since: -20), session("b", "x", .working, since: -5)], now: now, showNames: false))
         #expect(one.priority == .attention)
         #expect(one.leading == .symbol("hand.raised.fill", tint: .warning, pulse: true))
-        #expect(one.trailing == .text("notch\u{2026}"))
-        #expect(one.accessibilityLabel == "notcher: Needs permission")
+        #expect(one.trailing == .text("store\u{2026}"))
+        #expect(one.accessibilityLabel == "storefront: Needs permission")
         #expect(one.module == .claudeAgents)
 
         let two = try #require(ClaudeActivity.make(for: [session("a", "lanternfly", .needsPermission(detail: nil), since: -20), session("b", "y", .needsInput(detail: nil), since: -5)], now: now, showNames: false))
@@ -246,12 +246,12 @@ import Testing
     }
 
     @Test func namesOffIsExactlyThePreviousActivity() throws {
-        let waiting = [session("a", "notcher", .needsPermission(detail: "Bash"), since: -20)]
+        let waiting = [session("a", "storefront", .needsPermission(detail: "Bash"), since: -20)]
         let off = try #require(ClaudeActivity.make(for: waiting, now: now, showNames: false))
         #expect(off == LiveActivity(
             id: "claudeAgents.attention", module: .claudeAgents, priority: .attention,
-            leading: .symbol("hand.raised.fill", tint: .warning, pulse: true), trailing: .text("notch\u{2026}"),
-            updatedAt: now.addingTimeInterval(-20), accessibilityLabel: "notcher: Needs permission"
+            leading: .symbol("hand.raised.fill", tint: .warning, pulse: true), trailing: .text("store\u{2026}"),
+            updatedAt: now.addingTimeInterval(-20), accessibilityLabel: "storefront: Needs permission"
         ))
         let done = [session("a", "demo", .finished(at: now.addingTimeInterval(-2)), since: -2)]
         #expect(try #require(ClaudeActivity.make(for: done, now: now, showNames: false)) == LiveActivity(
@@ -263,16 +263,16 @@ import Testing
     }
 
     @Test func oneWaitingWithTool() throws {
-        let a = try #require(ClaudeActivity.make(for: [session("a", "notcher", .needsPermission(detail: "Bash"), since: -20), session("b", "x", .working, since: -5)], now: now))
-        #expect(a.leadingText == "notcher" && a.trailingText == "Allow Bash")
+        let a = try #require(ClaudeActivity.make(for: [session("a", "niche", .needsPermission(detail: "Bash"), since: -20), session("b", "x", .working, since: -5)], now: now))
+        #expect(a.leadingText == "niche" && a.trailingText == "Allow Bash")
         #expect(a.leading == .symbol("hand.raised.fill", tint: .warning, pulse: true) && a.trailing == nil)
-        #expect(a.accessibilityLabel == "notcher is waiting: Allow Bash")
+        #expect(a.accessibilityLabel == "niche is waiting: Allow Bash")
         #expect(a.id == "claudeAgents.attention" && a.priority == .attention && a.updatedAt == now.addingTimeInterval(-20))
     }
 
     @Test func oneWaitingWithoutToolOrForInput() throws {
-        let perm = try #require(ClaudeActivity.make(for: [session("a", "notcher", .needsPermission(detail: nil), since: -1)], now: now))
-        #expect(perm.trailingText == "Needs permission" && perm.accessibilityLabel == "notcher is waiting: Needs permission")
+        let perm = try #require(ClaudeActivity.make(for: [session("a", "niche", .needsPermission(detail: nil), since: -1)], now: now))
+        #expect(perm.trailingText == "Needs permission" && perm.accessibilityLabel == "niche is waiting: Needs permission")
         let input = try #require(ClaudeActivity.make(for: [session("a", "webshop", .needsInput(detail: "Pick a database"), since: -1)], now: now))
         #expect(input.leadingText == "webshop" && input.trailingText == "Needs input")
         #expect(input.leading == .symbol("questionmark.bubble.fill", tint: .warning, pulse: true))
@@ -361,7 +361,7 @@ import Testing
         #expect(SessionPresentation.elapsed(since: now.addingTimeInterval(-125), now: now) == "2m")
         #expect(SessionPresentation.elapsed(since: now.addingTimeInterval(-45), now: now) == "now")
         #expect(SessionPresentation.elapsed(since: now.addingTimeInterval(-7300), now: now) == "2h")
-        #expect(SessionPresentation.wingTitle("notcher") == "notch\u{2026}" && SessionPresentation.wingTitle("demo") == "demo")
+        #expect(SessionPresentation.wingTitle("storefront") == "store\u{2026}" && SessionPresentation.wingTitle("demo") == "demo")
         #expect(SessionPresentation.tint(for: .needsInput(detail: nil)) == .warning)
     }
 }

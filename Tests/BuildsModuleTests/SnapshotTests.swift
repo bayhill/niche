@@ -4,10 +4,10 @@ import NotchCoreTesting
 import Testing
 @testable import BuildsModule
 
-/// Writes the page in each state to $TMPDIR/notcher-snapshots for visual review.
+/// Writes the page in each state to $TMPDIR/niche-snapshots for visual review.
 @MainActor
 @Suite struct SnapshotTests {
-    static let dir = FileManager.default.temporaryDirectory.appending(path: "notcher-snapshots", directoryHint: .isDirectory)
+    static let dir = FileManager.default.temporaryDirectory.appending(path: "niche-snapshots", directoryHint: .isDirectory)
 
     private func write(_ module: BuildsModule, _ name: String) throws {
         let url = try ViewSnapshot.write(

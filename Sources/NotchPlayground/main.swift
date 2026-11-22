@@ -87,7 +87,7 @@ private func makeModules(_ options: PlaygroundOptions) -> [FakeModule] {
     let claude = FakeModule(.claudeAgents, title: "Claude", symbol: "sparkles", placement: .dashboard(.trailing), view: AnyView(
         GlassCard {
             SectionHeader("Claude", symbol: "sparkles") { StatusDot(.warning, pulsing: true).notchHero(.claudeAgents) }
-            ResultRow(symbol: "terminal", symbolTint: .warning, title: "notcher", detail: "Needs permission", trailing: "2m", trailingTint: .warning)
+            ResultRow(symbol: "terminal", symbolTint: .warning, title: "niche", detail: "Needs permission", trailing: "2m", trailingTint: .warning)
             ResultRow(symbol: "terminal", title: "lanternfly", detail: "Working")
             Spacer(minLength: 0)
         }
@@ -172,7 +172,7 @@ MainActor.assumeIsolated {
     let app = NSApplication.shared
     app.setActivationPolicy(.accessory)
 
-    let root = FileManager.default.temporaryDirectory.appending(path: "notcher-playground", directoryHint: .isDirectory)
+    let root = FileManager.default.temporaryDirectory.appending(path: "niche-playground", directoryHint: .isDirectory)
     let directories = AppDirectories.rooted(at: root)
     let settings = SettingsStore.ephemeral()
     settings.set(NotchSettings.openOnHover, options.hoverOpens)

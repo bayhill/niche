@@ -353,7 +353,7 @@ private func files(_ env: TestEnvironment, _ names: [String]) throws -> [URL] {
 
     @Test func snapshots() throws {
         let env = try TestEnvironment(); defer { env.cleanUp() }
-        let dir = ProcessInfo.processInfo.environment["NOTCHER_SNAPSHOT_DIR"].map { URL(fileURLWithPath: $0) } ?? env.root
+        let dir = ProcessInfo.processInfo.environment["NICHE_SNAPSHOT_DIR"].map { URL(fileURLWithPath: $0) } ?? env.root
         // The scroll view does not render off-screen, so the row is also drawn without one.
         try ViewSnapshot.write(module: ShelfModule.sample(), to: dir.appending(path: "shelf-module.png"))
         let full = try ViewSnapshot.write(ShelfPage(module: ShelfModule.sample(), scrolls: false), size: PanelLayout.pageSize, to: dir.appending(path: "shelf.png"))

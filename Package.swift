@@ -12,10 +12,10 @@ func module(_ name: String, deps: [Target.Dependency] = []) -> [Target] {
 }
 
 let package = Package(
-    name: "Notcher",
+    name: "Niche",
     platforms: [.macOS(.v26)],
     products: [
-        .executable(name: "Notcher", targets: ["NotcherApp"]),
+        .executable(name: "Niche", targets: ["NicheApp"]),
         .executable(name: "NotchPlayground", targets: ["NotchPlayground"]),
         .executable(name: "webpify", targets: ["webpify"]),
     ],
@@ -40,7 +40,7 @@ let package = Package(
 
         // The app: composition root
         .executableTarget(
-            name: "NotcherApp",
+            name: "NicheApp",
             dependencies: [
                 "NotchCore", "NotchUI", "ImageEngine", "ConvertModule", "ShelfModule", "ClipboardModule",
                 "NowPlayingModule", "CalendarModule", "ClaudeAgentsModule", "ScreenshotsModule", "ColourModule",

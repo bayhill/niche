@@ -58,8 +58,8 @@ private struct GeneralPane: View {
             if !model.settings.get(AppSettings.onboarded) {
                 Section {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Welcome to Notcher").font(.title2.weight(.semibold))
-                        Text("Drag images onto the notch to convert them to WebP, right next to the original. Click the notch or press ⌃⌥N to open the panel. Each module on the left can be set up or switched off at any time. Notcher does not open at login unless that is switched on below.")
+                        Text("Welcome to Niche").font(.title2.weight(.semibold))
+                        Text("Drag images onto the notch to convert them to WebP, right next to the original. Click the notch or press ⌃⌥N to open the panel. Each module on the left can be set up or switched off at any time. Niche does not open at login unless that is switched on below.")
                             .foregroundStyle(.secondary)
                         Button("Got it") { model.settings.set(AppSettings.onboarded, true) }
                             .buttonStyle(.borderedProminent).padding(.top, 4)
@@ -68,7 +68,7 @@ private struct GeneralPane: View {
                 }
             }
             Section("Startup") {
-                Toggle("Open Notcher at login", isOn: Binding(
+                Toggle("Open Niche at login", isOn: Binding(
                     get: { model.launchAtLogin },
                     set: { LoginItem.setEnabled($0); model.launchAtLogin = LoginItem.isEnabled }
                 ))
@@ -88,10 +88,10 @@ private struct GeneralPane: View {
             }
             Section {
                 HStack {
-                    Text("Notcher \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")")
+                    Text("Niche \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")")
                         .foregroundStyle(.secondary)
                     Spacer()
-                    Button("Quit Notcher") { NSApp.terminate(nil) }
+                    Button("Quit Niche") { NSApp.terminate(nil) }
                 }
             }
         }
@@ -143,7 +143,7 @@ final class SettingsWindowController {
                 styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                 backing: .buffered, defer: false
             )
-            w.title = "Notcher Settings"
+            w.title = "Niche Settings"
             w.isReleasedWhenClosed = false
             w.contentView = NSHostingView(rootView: SettingsRoot(model: model))
             w.center()

@@ -13,7 +13,7 @@ public enum ClipboardStatus: Sendable, Equatable {
     case paused
     /// Polling the change count and recording copies.
     case monitoring
-    /// macOS denies Notcher pasteboard access (System Settings). Nothing is read.
+    /// macOS denies Niche pasteboard access (System Settings). Nothing is read.
     case denied
 }
 

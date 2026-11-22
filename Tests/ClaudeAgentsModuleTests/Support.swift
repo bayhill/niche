@@ -26,10 +26,10 @@ actor RecordingRunner: ProcessRunning {
         var markets = json["extraKnownMarketplaces"] as? [String: Any] ?? [:]
         switch Array(arguments.prefix(3)) {
         case ["plugin", "marketplace", "add"]:
-            markets["notcher-local"] = ["source": ["source": "directory", "path": arguments[3]]]
-        case ["plugin", "install", "notcher-bridge@notcher-local"]: enabled["notcher-bridge@notcher-local"] = true
-        case ["plugin", "uninstall", "notcher-bridge@notcher-local"]: enabled["notcher-bridge@notcher-local"] = nil
-        case ["plugin", "marketplace", "remove"]: markets["notcher-local"] = nil
+            markets["niche-local"] = ["source": ["source": "directory", "path": arguments[3]]]
+        case ["plugin", "install", "niche-bridge@niche-local"]: enabled["niche-bridge@niche-local"] = true
+        case ["plugin", "uninstall", "niche-bridge@niche-local"]: enabled["niche-bridge@niche-local"] = nil
+        case ["plugin", "marketplace", "remove"]: markets["niche-local"] = nil
         default: break
         }
         json["enabledPlugins"] = enabled
@@ -69,7 +69,7 @@ enum Fixture {
     }
 
     static func tempDir(_ label: String = "claude") throws -> URL {
-        let url = FileManager.default.temporaryDirectory.appending(path: "notcher-\(label)-\(UUID().uuidString)", directoryHint: .isDirectory)
+        let url = FileManager.default.temporaryDirectory.appending(path: "niche-\(label)-\(UUID().uuidString)", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
     }

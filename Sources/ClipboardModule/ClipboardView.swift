@@ -40,7 +40,7 @@ struct ClipboardPage: View {
                 case .paused:
                     StatusMessage(
                         symbol: "pause.circle", title: "Resume clipboard history",
-                        message: "macOS asks before each read. Allowing Notcher in Privacy & Security skips this step."
+                        message: "macOS asks before each read. Allowing Niche in Privacy & Security skips this step."
                     ) {
                         GlassButton("Resume", symbol: "play.fill", prominence: .accent) { module.resume() }
                     }
@@ -48,7 +48,7 @@ struct ClipboardPage: View {
                 case .denied:
                     StatusMessage(
                         symbol: "hand.raised", title: "Allow clipboard access in System Settings",
-                        message: "Privacy & Security lists Notcher under pasting from other apps."
+                        message: "Privacy & Security lists Niche under pasting from other apps."
                     ) {
                         HStack(spacing: Tokens.Spacing.s) {
                             GlassButton("Open Settings", symbol: "gear") { module.openSettings() }

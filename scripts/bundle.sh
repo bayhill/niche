@@ -1,19 +1,19 @@
 #!/bin/bash
-# Builds Notcher, assembles Notcher.app by hand (no Xcode project), signs it and installs it.
-#   scripts/bundle.sh            release build, install to ~/Applications (quits a running Notcher and replaces the installed copy)
+# Builds Niche, assembles Niche.app by hand (no Xcode project), signs it and installs it.
+#   scripts/bundle.sh            release build, install to ~/Applications (quits a running Niche and replaces the installed copy)
 #   CONFIG=debug scripts/bundle.sh
-#   INSTALL=0 scripts/bundle.sh  build/Notcher.app only
-#   NOTCHER_SIGN_IDENTITY="My Identity" scripts/bundle.sh
+#   INSTALL=0 scripts/bundle.sh  build/Niche.app only
+#   NICHE_SIGN_IDENTITY="My Identity" scripts/bundle.sh
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CONFIG="${CONFIG:-release}"
 INSTALL="${INSTALL:-1}"
-APP_NAME="Notcher"
+APP_NAME="Niche"
 # The bundle identifier has one source: Resources/Info.plist.
 BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$ROOT/Resources/Info.plist")"
-# Code-signing identity. Override with NOTCHER_SIGN_IDENTITY; falls back to ad-hoc signing when it is not in the keychain.
-IDENTITY="${NOTCHER_SIGN_IDENTITY:-Notcher Local Signing}"
+# Code-signing identity. Override with NICHE_SIGN_IDENTITY; falls back to ad-hoc signing when it is not in the keychain.
+IDENTITY="${NICHE_SIGN_IDENTITY:-Niche Local Signing}"
 APP="$ROOT/build/$APP_NAME.app"
 INSTALL_DIR="$HOME/Applications"
 
@@ -23,8 +23,8 @@ swift build -c "$CONFIG" --product "$APP_NAME"
 BIN="$(swift build -c "$CONFIG" --show-bin-path)"
 
 # SwiftPM resource bundles resolve through Bundle.module, which does not work in a hand-assembled app.
-if compgen -G "$BIN/Notcher_*.bundle" > /dev/null; then
-  echo "error: a Notcher target declares SwiftPM resources ($(basename "$(compgen -G "$BIN/Notcher_*.bundle" | head -1)"))." >&2
+if compgen -G "$BIN/Niche_*.bundle" > /dev/null; then
+  echo "error: a Niche target declares SwiftPM resources ($(basename "$(compgen -G "$BIN/Niche_*.bundle" | head -1)"))." >&2
   echo "       Put files in Resources/ or Support/ and load them via Bundle.main instead." >&2
   exit 1
 fi
@@ -71,7 +71,7 @@ find "$APP/Contents/Frameworks" -maxdepth 1 -mindepth 1 -print0 | while IFS= rea
   codesign --force --sign "$SIGN" "$nested"
 done
 # Hardened runtime: another process cannot load code into the app to borrow its Calendar, folder or Automation access.
-codesign --force --sign "$SIGN" --identifier "$BUNDLE_ID" --options runtime --entitlements Resources/Notcher.entitlements "$APP"
+codesign --force --sign "$SIGN" --identifier "$BUNDLE_ID" --options runtime --entitlements Resources/Niche.entitlements "$APP"
 codesign --verify --strict "$APP"
 
 if [ "$INSTALL" = "1" ]; then

@@ -4,10 +4,10 @@ import NotchCore
 import NotchCoreTesting
 import Testing
 
-/// Writes the card in each state to $TMPDIR/notcher-snapshots for visual review.
+/// Writes the card in each state to $TMPDIR/niche-snapshots for visual review.
 @MainActor
 @Suite struct SnapshotTests {
-    static let dir = FileManager.default.temporaryDirectory.appending(path: "notcher-snapshots", directoryHint: .isDirectory)
+    static let dir = FileManager.default.temporaryDirectory.appending(path: "niche-snapshots", directoryHint: .isDirectory)
 
     @Test func cards() throws {
         let now = Date.now

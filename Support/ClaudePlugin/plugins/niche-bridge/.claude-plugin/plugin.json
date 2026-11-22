@@ -1,0 +1,9 @@
+{
+  "name": "niche-bridge",
+  "displayName": "Niche bridge",
+  "version": "1.0.1",
+  "description": "Hands each session event to the Niche notch app so it can show which sessions need you. Does nothing unless Niche's alerts are enabled.",
+  "author": { "name": "Niche" },
+  "license": "MIT",
+  "keywords": ["notch", "notifications", "status"]
+}

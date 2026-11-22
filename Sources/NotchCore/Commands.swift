@@ -105,7 +105,7 @@ private final class PipeDrain: Sendable {
     init(_ handle: FileHandle, group: DispatchGroup) {
         let fd = handle.fileDescriptor
         _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
-        source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: DispatchQueue(label: "notcher.command.pipe"))
+        source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: DispatchQueue(label: "niche.command.pipe"))
         group.enter()
         source.setEventHandler { [self] in drain(fd) }
         source.setCancelHandler {

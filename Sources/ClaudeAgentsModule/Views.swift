@@ -109,8 +109,8 @@ struct ClaudeSettingsView: View {
     var body: some View {
         Form {
             Section("Claude Code alerts") {
-                Text("Notcher shows which Claude Code sessions are running. Alerts add the moment a session needs permission or input, or finishes, beside the closed notch.")
-                Text("Install adds a small Claude Code plugin, notcher-bridge. For each session event it passes the session, folder, event name, tool name and notification text to Notcher; prompts, tool input and tool output are never written. Nothing is collected while alerts are off or Notcher is not running, and nothing goes over the network.")
+                Text("Niche shows which Claude Code sessions are running. Alerts add the moment a session needs permission or input, or finishes, beside the closed notch.")
+                Text("Install adds a small Claude Code plugin, niche-bridge. For each session event it passes the session, folder, event name, tool name and notification text to Niche; prompts, tool input and tool output are never written. Nothing is collected while alerts are off or Niche is not running, and nothing goes over the network.")
                     .foregroundStyle(.secondary)
                 LabeledContent("Status") {
                     Label(statusText, systemImage: statusSymbol).symbolRenderingMode(.multicolor)
@@ -151,7 +151,7 @@ struct ClaudeSettingsView: View {
             }
             Section {
                 if module.alertsState == .offStillRegistered {
-                    Text("Alerts are off and nothing is collected, but Claude Code still lists the notcher-bridge plugin. Remove it, or turn alerts back on.")
+                    Text("Alerts are off and nothing is collected, but Claude Code still lists the niche-bridge plugin. Remove it, or turn alerts back on.")
                 }
                 if !module.canChangeAlerts {
                     Text("Turn the Claude module on to set up alerts.").foregroundStyle(.secondary)

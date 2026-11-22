@@ -150,12 +150,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if show, statusItem == nil {
             let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-            item.button?.image = NSImage(systemSymbolName: "rectangle.topthird.inset.filled", accessibilityDescription: "Notcher")
+            item.button?.image = NSImage(systemSymbolName: "rectangle.topthird.inset.filled", accessibilityDescription: "Niche")
             let menu = NSMenu()
-            menu.addItem(withTitle: "Open Notcher", action: #selector(togglePanel), keyEquivalent: "").target = self
+            menu.addItem(withTitle: "Open Niche", action: #selector(togglePanel), keyEquivalent: "").target = self
             menu.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: ",").target = self
             menu.addItem(.separator())
-            menu.addItem(withTitle: "Quit Notcher", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+            menu.addItem(withTitle: "Quit Niche", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
             item.menu = menu
             statusItem = item
         } else if !show, let item = statusItem {

@@ -1,7 +1,7 @@
 import AppKit
 import NotchCore
 
-/// What macOS lets Notcher do with the general pasteboard (`NSPasteboard.AccessBehavior`, macOS 15.4+).
+/// What macOS lets Niche do with the general pasteboard (`NSPasteboard.AccessBehavior`, macOS 15.4+).
 public enum PasteboardAccess: Sendable, Equatable {
     /// Never asked yet: the first programmatic read shows the system's paste alert.
     case notDetermined

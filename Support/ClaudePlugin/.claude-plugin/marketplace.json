@@ -1,12 +1,12 @@
 {
-  "name": "notcher-local",
-  "description": "Local marketplace shipped inside Notcher.app. Holds the bridge that tells Notcher when a session needs you.",
-  "owner": { "name": "Notcher" },
+  "name": "niche-local",
+  "description": "Local marketplace shipped inside Niche.app. Holds the bridge that tells Niche when a session needs you.",
+  "owner": { "name": "Niche" },
   "plugins": [
     {
-      "name": "notcher-bridge",
-      "source": "./plugins/notcher-bridge",
-      "description": "Forwards session events (needs permission, waiting for input, finished) to the Notcher app."
+      "name": "niche-bridge",
+      "source": "./plugins/niche-bridge",
+      "description": "Forwards session events (needs permission, waiting for input, finished) to the Niche app."
     }
   ]
 }

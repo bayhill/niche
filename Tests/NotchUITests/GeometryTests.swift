@@ -535,7 +535,7 @@ struct WingAndHoverTests {
             #expect(HoverHint.isVisible(state: state, openOnHover: false) == (state == .hover))
             #expect(!HoverHint.isVisible(state: state, openOnHover: true))
         }
-        #expect(HoverHint.text == "Click to expand Notcher")
+        #expect(HoverHint.text == "Click to expand Niche")
         #expect(HoverHint.scale(progress: 0, reduceMotion: false) == HoverHint.startScale)
         #expect(HoverHint.scale(progress: 1, reduceMotion: false) == 1)
         #expect(abs(HoverHint.scale(progress: 0.5, reduceMotion: false) - 0.91) < 0.0001)

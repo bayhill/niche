@@ -4,10 +4,10 @@ import NotchCoreTesting
 @testable import NowPlayingModule
 import Testing
 
-/// Writes the card in each state to $TMPDIR/notcher-snapshots for visual review (210 × 184, the centre slot).
+/// Writes the card in each state to $TMPDIR/niche-snapshots for visual review (210 × 184, the centre slot).
 @MainActor
 @Suite struct SnapshotTests {
-    static let dir = FileManager.default.temporaryDirectory.appending(path: "notcher-snapshots", directoryHint: .isDirectory)
+    static let dir = FileManager.default.temporaryDirectory.appending(path: "niche-snapshots", directoryHint: .isDirectory)
 
     @Test func cards() async throws {
         let env = try TestEnvironment(); defer { env.cleanUp() }
