@@ -61,6 +61,13 @@ public final class RecordingShelf: ShelfAccepting {
 }
 
 @MainActor
+public final class RecordingPlayback: PlaybackControlling {
+    public private(set) var pauses = 0
+    public init() {}
+    public func pauseIfPlaying() { pauses += 1 }
+}
+
+@MainActor
 public final class RecordingNotchController: NotchControlling {
     public enum Call: Equatable { case expand(ModuleID?), collapse, toggle }
     public private(set) var calls: [Call] = []
@@ -80,6 +87,7 @@ public struct TestEnvironment {
     public let converter = RecordingConverter()
     public let shelf = RecordingShelf()
     public let notch = RecordingNotchController()
+    public let playback = RecordingPlayback()
 
     public init() throws {
         root = FileManager.default.temporaryDirectory.appending(path: "notcher-tests-\(UUID().uuidString)", directoryHint: .isDirectory)
@@ -92,6 +100,7 @@ public struct TestEnvironment {
         services.converter = converter
         services.shelf = shelf
         services.notch = notch
+        services.playback = playback
     }
 
     public func context(for module: ModuleID, mayPrompt: Bool = false) -> ModuleContext {

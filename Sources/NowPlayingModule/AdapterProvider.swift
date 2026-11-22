@@ -182,8 +182,8 @@ public final class AdapterProvider: NowPlayingProvider {
     }
 
     public func send(_ command: MediaCommand) {
-        if command == .togglePlayPause, var optimistic = last {
-            optimistic.isPlaying.toggle()
+        if var optimistic = last, let playing = command.isPlaying(after: optimistic.isPlaying) {
+            optimistic.isPlaying = playing
             deliver(optimistic)
         }
         let launcher = launcher, executable = locations.perl

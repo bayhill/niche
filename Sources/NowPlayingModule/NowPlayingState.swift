@@ -37,13 +37,28 @@ public struct NowPlayingState: Equatable, Sendable {
 
 public enum MediaCommand: Sendable, Equatable, CaseIterable {
     case togglePlayPause, next, previous
+    /// Pause only: unlike the toggle it can never start playback, whatever the source's state really is.
+    case pause
 
     /// MediaRemote command id understood by `mediaremote-adapter.pl send`.
     public var adapterID: Int {
         switch self {
+        case .pause: 1
         case .togglePlayPause: 2
         case .next: 4
         case .previous: 5
+        }
+    }
+}
+
+public extension MediaCommand {
+    /// What `isPlaying` is right after the command, shown at once without waiting for the source to report it.
+    /// `nil` when the command does not change it.
+    func isPlaying(after current: Bool) -> Bool? {
+        switch self {
+        case .togglePlayPause: !current
+        case .pause: false
+        case .next, .previous: nil
         }
     }
 }

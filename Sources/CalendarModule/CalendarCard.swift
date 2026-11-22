@@ -110,6 +110,11 @@ struct CalendarSettings: View {
                     Picker("Nudge before a meeting", selection: settings.binding(CalendarModule.nudgeMinutes)) {
                         ForEach(CalendarModule.nudgeChoices, id: \.self) { Text($0 == 0 ? "Off" : "\($0) minutes before").tag($0) }
                     }
+                } footer: {
+                    Text("Calls nudge at \(Int(MeetingNudge.callLead / 60)) minutes. A meeting with a place to go uses the time above.")
+                }
+                Section {
+                    Toggle("Pause music when joining", isOn: settings.binding(CalendarModule.pauseOnJoin))
                 }
             } else {
                 Text("Available once the module is running")

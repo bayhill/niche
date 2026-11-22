@@ -21,6 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var running: Set<ModuleID> = []
     private var converter: (any ImageConverting)?
     private var shelf: (any ShelfAccepting)?
+    private var playback: (any PlaybackControlling)?
     private var notch: NotchController?
     private var settingsWindow: SettingsWindowController?
     private var statusItem: NSStatusItem?
@@ -55,16 +56,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let convert = debug.fixtures ? ConvertModule.sample() : ConvertModule.live()
         let shelf = debug.fixtures ? ShelfModule.sample() : ShelfModule.live()
+        let nowPlaying = debug.fixtures ? NowPlayingModule.sample() : NowPlayingModule.live()
         modules = [
             convert,
             shelf,
             debug.fixtures ? ClipboardModule.sample() : ClipboardModule.live(),
-            debug.fixtures ? NowPlayingModule.sample() : NowPlayingModule.live(),
+            nowPlaying,
             debug.fixtures ? CalendarModule.sample() : CalendarModule.live(),
             debug.fixtures ? ClaudeAgentsModule.sample() : ClaudeAgentsModule.live(),
         ]
         self.converter = convert
         self.shelf = shelf
+        self.playback = nowPlaying
 
         let settingsWindow = SettingsWindowController(modules: modules, settings: settings, notchSettings: AnyView(NotchSettingsRows(settings: settings)))
         self.settingsWindow = settingsWindow
@@ -120,6 +123,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         services.converter = running.contains(.convert) ? converter : nil
         services.shelf = running.contains(.shelf) ? shelf : nil
+        services.playback = running.contains(.nowPlaying) ? playback : nil
     }
 
     /// The user asked for Notcher to start with the Mac: switch that on once, then leave the choice to Settings.

@@ -18,8 +18,8 @@ public final class SampleProvider: NowPlayingProvider {
 
     public func send(_ command: MediaCommand) {
         sent.append(command)
-        guard command == .togglePlayPause, var s = state else { return }
-        s.isPlaying.toggle()
+        guard var s = state, let playing = command.isPlaying(after: s.isPlaying), playing != s.isPlaying else { return }
+        s.isPlaying = playing
         state = s
         onUpdate?(s)
     }

@@ -27,6 +27,12 @@ public protocol ShelfAccepting: AnyObject {
 }
 
 @MainActor
+public protocol PlaybackControlling: AnyObject {
+    /// Pauses whatever is playing. Never starts playback: it does nothing when nothing is playing or nothing is known.
+    func pauseIfPlaying()
+}
+
+@MainActor
 public protocol NotchControlling: AnyObject {
     /// Open the panel, optionally on a module's page (`nil` = Home).
     func expand(page: ModuleID?)
@@ -42,6 +48,8 @@ public final class AppServices {
     public var converter: (any ImageConverting)?
     public var shelf: (any ShelfAccepting)?
     public var notch: (any NotchControlling)?
+    /// Implemented by Now Playing; used by Calendar when a meeting is joined.
+    public var playback: (any PlaybackControlling)?
     /// Opens the Settings window, optionally on a module's pane.
     public var openSettings: ((ModuleID?) -> Void)?
     public init() {}

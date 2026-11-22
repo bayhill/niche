@@ -53,7 +53,7 @@ public enum NowPlayingActivity {
 
 @MainActor
 @Observable
-public final class NowPlayingModule: NotchModule {
+public final class NowPlayingModule: NotchModule, PlaybackControlling {
     public enum Phase: Sendable, Equatable {
         /// Before `start`, or while the adapter self-test runs.
         case idle
@@ -283,6 +283,12 @@ public final class NowPlayingModule: NotchModule {
 
     public func send(_ command: MediaCommand) {
         active?.send(command)
+    }
+
+    /// `PlaybackControlling`: pauses only when something is known to be playing, with the pause-only command.
+    public func pauseIfPlaying() {
+        guard state?.isPlaying == true else { return }
+        send(.pause)
     }
 
     /// Brings the source app forward (activates it, or launches it if it quit) and collapses the notch.

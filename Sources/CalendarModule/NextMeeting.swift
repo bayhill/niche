@@ -85,35 +85,71 @@ public enum MeetingActivity {
 /// What is drawn is equal across refreshes within a phase (before the start, after the start). Only the accessibility
 /// label changes in between, with the minutes actually left, so it is right whenever VoiceOver reads it.
 public enum MeetingNudge: Sendable {
+    /// A call takes a click, not a walk: a meeting with a link and no place to go nudges this long before the start
+    /// (or at the setting, when that is shorter).
+    public static let callLead: TimeInterval = 2 * 60
+    /// A meeting still running is one "to wrap up" only if it ends by this long after the next one starts, so a
+    /// day-long block does not turn every nudge into "wrap up".
+    public static let wrapUpSlack: TimeInterval = 15 * 60
+
     /// Stable per meeting occurrence and start time: a meeting moved to another time nudges again.
     public static func id(for event: CalendarEvent) -> String {
         "calendar.nudge.\(event.id).\(Int(event.start.timeIntervalSince1970.rounded(.down)))"
     }
 
-    /// The first candidate in its nudge window (`start - lead ..< min(end, start + nowWindow)`) that the user has not
-    /// answered. `candidates` must come from `NextMeetingSelector.candidates`. `lead <= 0` means nudges are off.
-    public static func event(candidates: [CalendarEvent], now: Date, lead: TimeInterval, answered: Set<String>) -> CalendarEvent? {
+    /// How long before `event` its nudge appears: `setting` for a meeting with somewhere to go (or with no link at
+    /// all), `callLead` for a call. 0 when nudges are off (`setting <= 0`).
+    public static func lead(for event: CalendarEvent, setting: TimeInterval, callLead: TimeInterval = MeetingNudge.callLead) -> TimeInterval {
+        guard setting > 0 else { return 0 }
+        guard let link = event.link, place(event.location, provider: link.provider) == nil else { return setting }
+        return min(setting, max(0, callLead))
+    }
+
+    /// The first candidate in its nudge window (`start - lead(for:) ..< min(end, start + nowWindow)`) that the user
+    /// has not answered. `candidates` must come from `NextMeetingSelector.candidates`. `lead <= 0` means nudges are off.
+    public static func event(
+        candidates: [CalendarEvent], now: Date, lead: TimeInterval, callLead: TimeInterval = MeetingNudge.callLead, answered: Set<String>
+    ) -> CalendarEvent? {
         guard lead > 0 else { return nil }
         return candidates.first { e in
-            now >= e.start.addingTimeInterval(-lead) && now < expiry(of: e) && !answered.contains(id(for: e))
+            now >= e.start.addingTimeInterval(-self.lead(for: e, setting: lead, callLead: callLead)) && now < expiry(of: e)
+                && !answered.contains(id(for: e))
         }
     }
 
-    public static func make(candidates: [CalendarEvent], now: Date, lead: TimeInterval, answered: Set<String>) -> Nudge? {
-        event(candidates: candidates, now: now, lead: lead, answered: answered).map { make(for: $0, now: now) }
+    public static func make(
+        candidates: [CalendarEvent], now: Date, lead: TimeInterval, callLead: TimeInterval = MeetingNudge.callLead, answered: Set<String>
+    ) -> Nudge? {
+        event(candidates: candidates, now: now, lead: lead, callLead: callLead, answered: answered)
+            .map { make(for: $0, now: now, among: candidates) }
     }
 
-    /// The nudge for one event, whether or not it is in its window.
-    public static func make(for event: CalendarEvent, now: Date) -> Nudge {
+    /// The meeting the user is still in when `event` is about to start: another candidate that began earlier, is
+    /// running at `now` and ends no later than `wrapUpSlack` after `event` starts.
+    public static func running(before event: CalendarEvent, among candidates: [CalendarEvent], now: Date) -> CalendarEvent? {
+        candidates.first { e in
+            e.id != event.id && e.start < event.start && e.start <= now && now < e.end
+                && e.end <= event.start.addingTimeInterval(wrapUpSlack)
+        }
+    }
+
+    /// The nudge for one event, whether or not it is in its window. `candidates` are looked at only for a meeting
+    /// still running, which turns "time to head over" into "time to wrap up".
+    public static func make(for event: CalendarEvent, now: Date, among candidates: [CalendarEvent] = []) -> Nudge {
         let link = event.link
-        let trimmed = event.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        let title = trimmed.isEmpty ? "Meeting" : trimmed
+        let title = name(event) ?? "Meeting"
         let message: String, label: String
         if now < event.start {
-            let place = self.place(event.location, provider: link?.provider)
             let minutes = max(1, Int((event.start.timeIntervalSince(now) / 60).rounded(.up)))
-            message = "Hey buddy, time to head " + (place.map { "to \($0)" } ?? "over")
-            label = "\(title) starts in \(minutes) minute\(minutes == 1 ? "" : "s"). Time to head \(place.map { "to \($0)" } ?? "over")."
+            let starts = "\(title) starts in \(minutes) minute\(minutes == 1 ? "" : "s")."
+            if let current = running(before: event, among: candidates, now: now) {
+                message = "Hey buddy, time to wrap up"
+                label = "\(starts) Time to wrap up\(name(current).map { " \($0)" } ?? "")."
+            } else {
+                let place = self.place(event.location, provider: link?.provider)
+                message = "Hey buddy, time to head " + (place.map { "to \($0)" } ?? "over")
+                label = "\(starts) Time to head \(place.map { "to \($0)" } ?? "over")."
+            }
         } else {
             message = "Hey buddy, it has started"
             label = "\(title) has started."
@@ -123,6 +159,11 @@ public enum MeetingNudge: Sendable {
             message: message, countdown: event.start, actionTitle: link == nil ? nil : "Join", expiresAt: expiry(of: event),
             accessibilityLabel: label
         )
+    }
+
+    private static func name(_ event: CalendarEvent) -> String? {
+        let trimmed = event.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     /// After this the meeting is no longer worth a nudge: the wing's "now" window, or the end if sooner.
@@ -163,13 +204,16 @@ public enum MeetingNudge: Sendable {
 /// When the module should look again. Pure.
 public enum CalendarSchedule {
     /// The next instant the card or wing could change, but at least once a minute.
-    /// `nudgeLead` is the nudge's lead (`0` when nudges are off); the start itself is already a boundary.
+    /// `nudgeLead` is the nudge setting (`0` when nudges are off) and `callLead` the lead for calls; each event wakes
+    /// the module at its own nudge lead. The start itself is already a boundary.
     public static func nextRefresh(
-        after now: Date, candidates: [CalendarEvent], lead: TimeInterval, nudgeLead: TimeInterval = 0, maxInterval: TimeInterval = 60
+        after now: Date, candidates: [CalendarEvent], lead: TimeInterval, nudgeLead: TimeInterval = 0,
+        callLead: TimeInterval = MeetingNudge.callLead, maxInterval: TimeInterval = 60
     ) -> Date {
         let boundaries = candidates.flatMap { e in
             [
-                e.start.addingTimeInterval(-lead), e.start.addingTimeInterval(-max(0, nudgeLead)), e.start,
+                e.start.addingTimeInterval(-lead),
+                e.start.addingTimeInterval(-MeetingNudge.lead(for: e, setting: nudgeLead, callLead: callLead)), e.start,
                 e.start.addingTimeInterval(MeetingActivity.nowWindow),
                 e.start.addingTimeInterval(NextMeetingSelector.inProgressWindow), e.end,
             ]

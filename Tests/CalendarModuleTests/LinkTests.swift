@@ -23,6 +23,35 @@ import Testing
         #expect(l?.url.absoluteString == Self.teams)
     }
 
+    // MARK: App links
+
+    @Test func teamsJoinLinkOpensInTheApp() {
+        let app = link(notes: Self.teams)?.appURL
+        #expect(app?.absoluteString == "msteams:" + Self.teams.dropFirst("https://teams.microsoft.com".count))
+        #expect(app?.scheme == "msteams")
+        #expect(app?.host() == nil)
+        #expect(link(notes: "https://teams.cloud.microsoft/l/meetup-join/19%3ameeting_x%40thread.v2/0")?.appURL?.absoluteString
+            == "msteams:/l/meetup-join/19%3ameeting_x%40thread.v2/0")
+    }
+
+    @Test func zoomMeetingOpensInTheApp() {
+        #expect(link(notes: "https://acme.zoom.us/j/842000000?pwd=Ab.c-1_2&from=addon")?.appURL?.absoluteString
+            == "zoommtg://acme.zoom.us/join?confno=842000000&pwd=Ab.c-1_2")
+        #expect(link(notes: "https://zoom.us/j/84200000012")?.appURL?.absoluteString == "zoommtg://zoom.us/join?confno=84200000012")
+    }
+
+    @Test func linksWithoutAKnownAppFormStayInTheBrowser() {
+        for text in [
+            "https://teams.microsoft.com/meet/2468?p=x1y2", "https://teams.live.com/meet/9876543210?p=abc",
+            "https://acme.zoom.us/w/842000000", "https://acme.zoom.us/wc/join/842000000",
+            "https://meet.google.com/abc-defg-hij", "https://acme.webex.com/meet/someone",
+        ] {
+            let l = link(notes: text)
+            #expect(l != nil, "\(text)")
+            #expect(l?.appURL == nil, "\(text)")
+        }
+    }
+
     @Test func teamsLiveAndShortMeetLinks() {
         #expect(link(notes: "Join: https://teams.live.com/meet/9876543210?p=abc")?.provider == .teams)
         #expect(link(notes: "https://teams.microsoft.com/meet/2468?p=x1y2")?.provider == .teams)

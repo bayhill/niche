@@ -11,6 +11,7 @@ Glass.
 - **Now Playing** — title, artist, artwork and transport, also beside the closed notch.
 - **Next meeting** — from the calendars macOS knows about, with a Join button for Teams, Meet, Zoom and Webex links.
   Five minutes before a meeting the notch grows and says so, until it is answered (the lead time is a setting, as is off).
+  Calls nudge two minutes before. Join opens the Teams or Zoom app directly when it is installed, and pauses what is playing.
 - **Claude Code sessions** — which sessions are running and which one is waiting.
 
 ## Requirements

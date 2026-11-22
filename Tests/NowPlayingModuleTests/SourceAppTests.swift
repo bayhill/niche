@@ -100,6 +100,44 @@ final class OpenerRecorder {
         m.stop()
     }
 
+    @Test func pauseIfPlayingOnlyEverPauses() async throws {
+        let env = try TestEnvironment(); defer { env.cleanUp() }
+        let r = OpenerRecorder() // kept alive: the opener's closures hold it unowned
+        let (m, adapter) = await start(r, env)
+        // Nothing known: nothing sent.
+        m.pauseIfPlaying()
+        #expect(adapter.sent.isEmpty)
+        adapter.onUpdate?(NowPlayingState(title: "A", isPlaying: false, bundleID: "com.spotify.client"))
+        m.pauseIfPlaying()
+        #expect(adapter.sent.isEmpty)
+        // Playing: the pause-only command, never the toggle.
+        adapter.onUpdate?(NowPlayingState(title: "A", isPlaying: true, bundleID: "com.spotify.client"))
+        m.pauseIfPlaying()
+        #expect(adapter.sent == [.pause])
+        let service: any PlaybackControlling = m
+        service.pauseIfPlaying()
+        #expect(adapter.sent == [.pause, .pause])
+        #expect(r.activated.isEmpty && r.launched.isEmpty)
+        m.stop()
+    }
+
+    @Test func pauseIsItsOwnCommand() {
+        #expect(MediaCommand.pause.adapterID == 1)
+        #expect(MediaCommand.togglePlayPause.adapterID == 2)
+        #expect(Set(MediaCommand.allCases.map(\.adapterID)).count == MediaCommand.allCases.count)
+        #expect(MediaCommand.pause.isPlaying(after: true) == false)
+        #expect(MediaCommand.pause.isPlaying(after: false) == false)
+        #expect(MediaCommand.togglePlayPause.isPlaying(after: false) == true)
+        #expect(MediaCommand.next.isPlaying(after: true) == nil)
+        for player in ScriptablePlayer.allCases { #expect(player.commandScript(.pause).hasSuffix(" to pause")) }
+        // The sample source pauses and stays paused.
+        let sample = SampleProvider(state: SampleProvider.track)
+        sample.send(.pause)
+        #expect(sample.state?.isPlaying == false)
+        sample.send(.pause)
+        #expect(sample.state?.isPlaying == false)
+    }
+
     @Test func transportDoesNotOpenTheApp() async throws {
         let env = try TestEnvironment(); defer { env.cleanUp() }
         let r = OpenerRecorder()

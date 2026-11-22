@@ -16,6 +16,8 @@ public final class CalendarModule: NotchModule {
     /// Minutes before a meeting that the notch grows by itself to say it is time to go. 0 is off.
     public static let nudgeMinutes = SettingsKey("calendar.nudgeMinutes", default: 5)
     public static let nudgeChoices = [0, 2, 5, 10, 15]
+    /// Joining a meeting pauses whatever is playing.
+    public static let pauseOnJoin = SettingsKey("calendar.pauseOnJoin", default: true)
 
     public let id = ModuleID.calendar
     public let title = "Calendar"
@@ -36,6 +38,9 @@ public final class CalendarModule: NotchModule {
     @ObservationIgnored private let now: @MainActor () -> Date
     @ObservationIgnored private let sleep: @Sendable (Duration) async throws -> Void
     @ObservationIgnored private let openURL: @MainActor (URL) -> Void
+    /// Whether an app is installed for a meeting's app link (`MeetingLink.appURL`).
+    @ObservationIgnored private let canOpenInApp: @MainActor (URL) -> Bool
+    @ObservationIgnored private var services: AppServices?
     @ObservationIgnored private var settings: SettingsStore?
     /// Overrides the `nudgeMinutes` setting (the sample uses it so its meeting 12 minutes away nudges).
     @ObservationIgnored private let nudgeLeadOverride: TimeInterval?
@@ -56,18 +61,22 @@ public final class CalendarModule: NotchModule {
         source: any EventSource, now: @escaping @MainActor () -> Date = { .now },
         sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
         openURL: @escaping @MainActor (URL) -> Void = { NSWorkspace.shared.open($0) },
+        canOpenInApp: @escaping @MainActor (URL) -> Bool = { _ in false },
         settings: SettingsStore? = nil, nudgeLead: TimeInterval? = nil
     ) {
         self.source = source; self.now = now; self.sleep = sleep; self.openURL = openURL; self.settings = settings
+        self.canOpenInApp = canOpenInApp
         nudgeLeadOverride = nudgeLead
         access = source.access
         refreshedAt = now()
     }
 
-    public static func live() -> CalendarModule { CalendarModule(source: EventKitSource()) }
+    public static func live() -> CalendarModule {
+        CalendarModule(source: EventKitSource(), canOpenInApp: { NSWorkspace.shared.urlForApplication(toOpen: $0) != nil })
+    }
 
     /// Sample meetings relative to now, already loaded. No EventKit. Nudges 15 minutes ahead whatever the setting
-    /// says, so the design review 12 minutes away shows a nudge.
+    /// says and whether or not the meeting is a call, so the design review 12 minutes away shows a nudge.
     public static func sample() -> CalendarModule {
         let module = CalendarModule(source: SampleEventSource.demo(), openURL: { _ in }, nudgeLead: 15 * 60)
         module.refresh()
@@ -79,11 +88,14 @@ public final class CalendarModule: NotchModule {
     public var nudgeLead: TimeInterval {
         nudgeLeadOverride ?? TimeInterval((settings?.get(Self.nudgeMinutes) ?? Self.nudgeMinutes.defaultValue) * 60)
     }
+    /// The lead for a call (a link and nowhere to walk to).
+    var callLead: TimeInterval { nudgeLeadOverride ?? MeetingNudge.callLead }
 
     public func start(_ context: ModuleContext) async {
         guard !running else { return }
         running = true
         if settings == nil { settings = context.settings }
+        services = context.services
         log = context.log
         access = source.access
         // Also when not (yet) granted: refreshing re-reads the status without prompting, so access granted later in
@@ -113,13 +125,20 @@ public final class CalendarModule: NotchModule {
     }
 
     public func join() {
-        guard let url = meeting?.link?.url else { return }
-        openURL(url)
+        guard let link = meeting?.link else { return }
+        open(link)
+    }
+
+    /// Joins: pauses what is playing (unless switched off), then opens the service's own app when it is installed and
+    /// the link has an app form, else the browser link.
+    private func open(_ link: MeetingLink) {
+        if settings?.get(Self.pauseOnJoin) ?? Self.pauseOnJoin.defaultValue { services?.playback?.pauseIfPlaying() }
+        if let app = link.appURL, canOpenInApp(app) { openURL(app) } else { openURL(link.url) }
     }
 
     public func performNudgeAction(_ id: Nudge.ID) {
         guard nudge?.id == id else { return }
-        if let url = nudgedEvent?.link?.url { openURL(url) }
+        if let link = nudgedEvent?.link { open(link) }
         answer(id)
     }
 
@@ -170,10 +189,11 @@ public final class CalendarModule: NotchModule {
         let imminent = next.map { $0.isNow || $0.event.start.timeIntervalSince(t) <= lead } ?? false
         let nudgeLead = nudgeLead
         answered = answered.filter { $0.value > t }
-        let nudged = MeetingNudge.event(candidates: candidates, now: t, lead: nudgeLead, answered: Set(answered.keys))
+        let callLead = callLead
+        let nudged = MeetingNudge.event(candidates: candidates, now: t, lead: nudgeLead, callLead: callLead, answered: Set(answered.keys))
         nudgedEvent = nudged
-        set(meeting: next, activity: activity, imminent: imminent, nudge: nudged.map { MeetingNudge.make(for: $0, now: t) })
-        if running { schedule(at: CalendarSchedule.nextRefresh(after: t, candidates: candidates, lead: lead, nudgeLead: nudgeLead)) }
+        set(meeting: next, activity: activity, imminent: imminent, nudge: nudged.map { MeetingNudge.make(for: $0, now: t, among: candidates) })
+        if running { schedule(at: CalendarSchedule.nextRefresh(after: t, candidates: candidates, lead: lead, nudgeLead: nudgeLead, callLead: callLead)) }
     }
 
     private func set(meeting next: NextMeeting?, activity: LiveActivity?, imminent: Bool, nudge newNudge: Nudge?) {

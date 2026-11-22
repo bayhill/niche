@@ -32,6 +32,7 @@ public enum ScriptablePlayer: String, Sendable, CaseIterable {
     func commandScript(_ command: MediaCommand) -> String {
         let verb = switch command {
         case .togglePlayPause: "playpause"
+        case .pause: "pause"
         case .next: "next track"
         case .previous: "previous track"
         }
@@ -181,8 +182,8 @@ public final class AppleScriptProvider: NowPlayingProvider {
 
     public func send(_ command: MediaCommand) {
         guard let player = lastPlayer else { return }
-        if command == .togglePlayPause, var optimistic = last {
-            optimistic.isPlaying.toggle()
+        if var optimistic = last, let playing = command.isPlaying(after: optimistic.isPlaying) {
+            optimistic.isPlaying = playing
             deliver(optimistic)
         }
         let runner = runner, script = player.commandScript(command)

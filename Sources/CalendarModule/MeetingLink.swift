@@ -29,6 +29,36 @@ public struct MeetingLink: Sendable, Equatable {
     public init(provider: MeetingProvider, url: URL) { self.provider = provider; self.url = url }
 }
 
+public extension MeetingLink {
+    /// The same meeting as a link the service's own app opens directly, skipping the browser page whose only job is
+    /// to ask whether to open the app. Built here from the validated https link, never taken from invite text.
+    /// `nil` when the link has no form known to work (a Teams short link, a Zoom webinar or web-client link, Meet,
+    /// Webex): the browser link is used.
+    var appURL: URL? {
+        guard let parts = URLComponents(url: url, resolvingAgainstBaseURL: false), let host = parts.host?.lowercased() else { return nil }
+        let path = parts.percentEncodedPath
+        var out = URLComponents()
+        switch provider {
+        case .teams:
+            // What the Teams launcher page itself navigates to: msteams:/l/meetup-join/<thread>/0?context=...
+            guard host == "teams.microsoft.com" || host == "teams.cloud.microsoft", path.lowercased().hasPrefix("/l/meetup-join/") else { return nil }
+            out.scheme = "msteams"
+            out.percentEncodedPath = path
+            out.percentEncodedQuery = parts.percentEncodedQuery
+        case .zoom:
+            let segments = path.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
+            guard segments.count == 2, segments[0].lowercased() == "j" else { return nil }
+            out.scheme = "zoommtg"
+            out.host = host
+            out.path = "/join"
+            out.queryItems = [URLQueryItem(name: "confno", value: segments[1])] + (parts.queryItems?.filter { $0.name == "pwd" } ?? [])
+        case .meet, .webex:
+            return nil
+        }
+        return out.url
+    }
+}
+
 /// Finds the join link of a video meeting in an event. Pure.
 public enum MeetingLinkExtractor {
     /// Looks at the event URL, then the location, then the notes, and returns the first recognised meeting link.
