@@ -59,8 +59,8 @@ private func makeModules(_ options: PlaygroundOptions) -> [FakeModule] {
                     .clipShape(RoundedRectangle(cornerRadius: Tokens.Radius.thumbnail, style: .continuous))
                     .notchHero(.nowPlaying)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("Weightless").notchStyle(.title).lineLimit(1)
-                    Text("Marconi Union").notchStyle(.caption).lineLimit(1)
+                    Text("Low Tide").notchStyle(.title).lineLimit(1)
+                    Text("Saltmere Quartet").notchStyle(.caption).lineLimit(1)
                 }
                 Spacer(minLength: 0)
                 EqualizerBars(playing: true)
@@ -117,10 +117,10 @@ private func makeModules(_ options: PlaygroundOptions) -> [FakeModule] {
     case "progress": [(convert, .progress, .progress(0.62), .text("3/12"), "Converting 3 of 12")]
     case "text": [(convert, .progress, .text("3/12"), .progress(0.25), "Converting 3 of 12")]
     case "countdown": [(calendar, .passive, .countdown(to: soon), .symbol("calendar", tint: .accent), "Design review soon")]
-    case "image", "nowplaying", "nowplaying-short", "nowplaying-long": [(nowPlaying, .ambient, .image(Samples.art), .equalizer(playing: true), "Weightless playing")]
-    case "equalizer": [(nowPlaying, .ambient, .equalizer(playing: true), .image(Samples.art), "Weightless playing")]
+    case "image", "nowplaying", "nowplaying-short", "nowplaying-long": [(nowPlaying, .ambient, .image(Samples.art), .equalizer(playing: true), "Low Tide playing")]
+    case "equalizer": [(nowPlaying, .ambient, .equalizer(playing: true), .image(Samples.art), "Low Tide playing")]
     default: [
-        (nowPlaying, .ambient, .image(Samples.art), .equalizer(playing: true), "Weightless playing"),
+        (nowPlaying, .ambient, .image(Samples.art), .equalizer(playing: true), "Low Tide playing"),
         (convert, .progress, .progress(0.1), .text("1/12"), "Converting"),
     ]
     }
@@ -130,11 +130,11 @@ private func makeModules(_ options: PlaygroundOptions) -> [FakeModule] {
         }
         // Wing text: `--glyph nowplaying` (long title), `nowplaying-short`, or `nowplaying-long` (both lines past the cap).
         let texts: (String, String)? = switch options.glyph {
-        case "nowplaying": ("Weightless (Ambient Transmission, Part 1) – Remastered 2024", "Marconi Union")
-        case "nowplaying-short": ("Weightless", "Marconi Union")
+        case "nowplaying": ("Low Tide (Night Ferry Reprise, Part 1) – Restored 2024", "Saltmere Quartet")
+        case "nowplaying-short": ("Low Tide", "Saltmere Quartet")
         case "nowplaying-long": (
-            "Weightless (Ambient Transmission, Part 1) – Live at the Royal Albert Hall, Remastered 2024 Deluxe Edition",
-            "Marconi Union, Jules Buckley, The Metropole Orkest and the BBC Concert Orchestra"
+            "Low Tide (Night Ferry Reprise, Part 1) – Live at the Old Harbour Hall, Restored 2024 Deluxe Edition",
+            "Saltmere Quartet, the Glasswing Chamber Ensemble and the Harbour Town Concert Orchestra"
         )
         default: nil
         }

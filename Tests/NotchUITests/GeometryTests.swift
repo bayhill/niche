@@ -282,7 +282,7 @@ struct WingAndHoverTests {
     }
 
     @Test func bothLongAreCappedIndependently() {
-        let long = WingText.measure("Weightless (Ambient Transmission, Part 1) – Live at the Royal Albert Hall, Remastered 2024")
+        let long = WingText.measure("Low Tide (Night Ferry Reprise, Part 1) – Live at the Old Harbour Hall, Restored Edition 2024")
         #expect(long > PanelLayout.wingMaxWidth)
         let l = wings(long, long)
         #expect(l.wings.leading == PanelLayout.wingMaxWidth && l.wings.trailing == PanelLayout.wingMaxWidth)

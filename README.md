@@ -96,7 +96,8 @@ The debug flags are documented in `Sources/NotchCore/DebugOptions.swift`; `--pag
 ## Privacy
 
 Notcher has no telemetry and no accounts. It makes two kinds of network request, both optional: when Now Playing
-falls back to AppleScript for Spotify, it downloads the album artwork from the address Spotify reports; and when
+falls back to AppleScript for Spotify, it downloads the album artwork from the address Spotify reports (over https,
+without keeping a copy on disk); and when
 Builds is switched on, it runs the GitHub CLI (`gh run list`) for the repositories added in Settings.
 
 What it reads:
@@ -109,8 +110,9 @@ What it reads:
   CLI, which adds two entries to `~/.claude/settings.json`. The plugin passes a few short fields per event (never
   tool input or tool output; a session title, which Claude Code may derive from the prompt, is one of them), and the
   app deletes each event after reading it.
-- **Builds** never sees a token: it uses the `gh` that is installed and signed in, and does nothing without it. A
-  repository on a host other than github.com is only added after confirming that host.
+- **Builds** never sees a token: it uses the `gh` that is installed and signed in, and does nothing without it.
+  Enterprise tokens and `GH_HOST` in the environment are not passed on to `gh`, and a repository whose remote is on a
+  host other than github.com is added only after that host is confirmed in Settings.
 - **Dev servers** reads the list of listening processes with `lsof` and only stops a process when its Stop button is
   clicked twice.
 
