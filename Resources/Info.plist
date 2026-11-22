@@ -21,6 +21,9 @@
 	<key>NSSupportsAutomaticTermination</key><false/>
 	<key>NSSupportsSuddenTermination</key><false/>
 	<key>NSCalendarsFullAccessUsageDescription</key><string>Notcher shows your next meeting beside the notch and lets you join it with one click.</string>
+	<key>NSDesktopFolderUsageDescription</key><string>Notcher shows your recent screenshots in the notch so you can drag them out, convert them or put them on the shelf.</string>
+	<key>NSDocumentsFolderUsageDescription</key><string>Notcher shows your recent screenshots in the notch so you can drag them out, convert them or put them on the shelf.</string>
+	<key>NSDownloadsFolderUsageDescription</key><string>Notcher shows your recent screenshots in the notch so you can drag them out, convert them or put them on the shelf.</string>
 	<key>NSAppleEventsUsageDescription</key><string>Notcher asks Spotify and Music what is playing so it can show the track and its controls in the notch.</string>
 </dict>
 </plist>

@@ -13,6 +13,9 @@ Glass.
   Five minutes before a meeting the notch grows and says so, until it is answered (the lead time is a setting, as is off).
   Calls nudge two minutes before. Join opens the Teams or Zoom app directly when it is installed, and pauses what is playing.
 - **Claude Code sessions** — which sessions are running and which one is waiting.
+- **Screenshots** — the last day's screenshots as they are taken: drag one out, convert it to WebP or put it on the
+  shelf. Off until switched on; found through Spotlight, never moved or deleted.
+- **Colour** — pick any pixel on screen and copy it as hex, rgb, oklch or Display P3, with a contrast check between two picks.
 
 ## Requirements
 

@@ -41,6 +41,8 @@ capture drop --force-state drop
 capture home --force-state expanded
 capture shelf --force-state expanded --page shelf
 capture clipboard --force-state expanded --page clipboard
+capture screenshots --force-state expanded --page screenshots
+capture colour --force-state expanded --page colour
 
 echo "==> Log"
 /usr/bin/log show --last 3m --style compact \
