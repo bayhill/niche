@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import Synchronization
 import ImageIO
 import NotchCore
 import Observation
@@ -161,5 +162,30 @@ public enum TestImage {
     public static func write(_ image: CGImage, to url: URL, type: UTType = .png) throws -> URL {
         try data(image, type: type).write(to: url)
         return url
+    }
+}
+
+/// Runs nothing: records each command and answers from `respond`.
+public final class ScriptedCommandRunner: CommandRunning {
+    public struct Call: Sendable, Equatable {
+        public var executable: URL
+        public var arguments: [String]
+        public var environment: [String: String]?
+    }
+
+    private let state = Mutex<[Call]>([])
+    private let respond: @Sendable (Call) -> CommandResult
+
+    /// - Parameter respond: the result for each command; called on whatever thread the command was run from.
+    public init(_ respond: @escaping @Sendable (Call) -> CommandResult = { _ in CommandResult(status: 0) }) {
+        self.respond = respond
+    }
+
+    public var calls: [Call] { state.withLock { $0 } }
+
+    public func run(_ executable: URL, arguments: [String], environment: [String: String]?, timeout: Duration) async -> CommandResult {
+        let call = Call(executable: executable, arguments: arguments, environment: environment)
+        state.withLock { $0.append(call) }
+        return respond(call)
     }
 }

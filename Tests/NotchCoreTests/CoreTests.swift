@@ -312,3 +312,69 @@ private func activity(_ id: String, _ p: LiveActivity.Priority, updated: TimeInt
         #expect((try Data(contentsOf: url)).count > 0)
     }
 }
+
+@MainActor @Suite struct ModuleSwitchTests {
+    @Test func ordinaryModulesAreOnUntilSwitchedOff() {
+        let settings = SettingsStore.ephemeral()
+        #expect(CoreSettings.isEnabled(.shelf, in: settings))
+        CoreSettings.setEnabled(.shelf, false, in: settings)
+        #expect(!CoreSettings.isEnabled(.shelf, in: settings))
+        #expect(settings.get(CoreSettings.disabledModules) == ["shelf"])
+        #expect(!CoreSettings.isEnabled(.shelf, in: settings, fixtures: true))
+        CoreSettings.setEnabled(.shelf, true, in: settings)
+        #expect(CoreSettings.isEnabled(.shelf, in: settings))
+        #expect(settings.get(CoreSettings.disabledModules).isEmpty)
+    }
+
+    @Test func optInModulesAreOffUntilSwitchedOn() {
+        let settings = SettingsStore.ephemeral()
+        for id in CoreSettings.optInModules {
+            #expect(!CoreSettings.isEnabled(id, in: settings))
+            // A fixtures run shows every module with its sample data.
+            #expect(CoreSettings.isEnabled(id, in: settings, fixtures: true))
+        }
+        CoreSettings.setEnabled(.builds, true, in: settings)
+        #expect(CoreSettings.isEnabled(.builds, in: settings))
+        #expect(!CoreSettings.isEnabled(.devServers, in: settings))
+        #expect(settings.get(CoreSettings.enabledModules) == ["builds"])
+        #expect(settings.get(CoreSettings.disabledModules).isEmpty)
+        CoreSettings.setEnabled(.builds, false, in: settings)
+        #expect(!CoreSettings.isEnabled(.builds, in: settings))
+        #expect(settings.get(CoreSettings.enabledModules).isEmpty)
+    }
+}
+
+@Suite struct CommandRunnerTests {
+    @Test func capturesOutputAndStatus() async {
+        let runner = ProcessCommandRunner()
+        let echo = await runner.run(URL(fileURLWithPath: "/bin/echo"), arguments: ["hello"], timeout: .seconds(5))
+        #expect(echo.succeeded && echo.text == "hello\n")
+        let failing = await runner.run(URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", "echo oops >&2; exit 3"], timeout: .seconds(5))
+        #expect(failing.status == 3 && !failing.succeeded)
+        #expect(String(decoding: failing.stderr, as: UTF8.self) == "oops\n")
+    }
+
+    @Test func passesTheEnvironmentGiven() async {
+        let result = await ProcessCommandRunner().run(
+            URL(fileURLWithPath: "/usr/bin/env"), arguments: [], environment: ["NOTCHER_TEST": "1"], timeout: .seconds(5)
+        )
+        #expect(result.text == "NOTCHER_TEST=1\n")
+    }
+
+    @Test func stopsACommandThatRunsTooLong() async {
+        let result = await ProcessCommandRunner().run(URL(fileURLWithPath: "/bin/sleep"), arguments: ["30"], timeout: .milliseconds(100))
+        #expect(result.timedOut && !result.succeeded)
+    }
+
+    @Test func aMissingToolIsAResultNotACrash() async {
+        let result = await ProcessCommandRunner().run(URL(fileURLWithPath: "/nonexistent/tool"), arguments: [], timeout: .seconds(1))
+        #expect(result.status == -1 && !result.succeeded)
+    }
+
+    @Test func theScriptedRunnerRecordsAndAnswers() async {
+        let runner = ScriptedCommandRunner { call in CommandResult(status: 0, stdout: Data(call.arguments.joined(separator: " ").utf8)) }
+        let result = await runner.run(URL(fileURLWithPath: "/usr/bin/tool"), arguments: ["a", "b"], timeout: .seconds(1))
+        #expect(result.text == "a b")
+        #expect(runner.calls.map(\.arguments) == [["a", "b"]])
+    }
+}

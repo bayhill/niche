@@ -58,4 +58,26 @@ public final class SettingsStore {
 public enum CoreSettings {
     /// Module ids the user has switched off.
     public static let disabledModules = SettingsKey<[String]>("core.disabledModules", default: [])
+    /// Opt-in module ids the user has switched on.
+    public static let enabledModules = SettingsKey<[String]>("core.enabledModules", default: [])
+    /// Modules that are off until switched on in Settings: tools that only some people have a use for.
+    public static let optInModules: Set<ModuleID> = [.devServers, .builds]
+
+    /// Whether a module runs and shows in the notch.
+    /// - Parameter fixtures: a `--fixtures` run, which shows every module with its sample data.
+    @MainActor
+    public static func isEnabled(_ id: ModuleID, in settings: SettingsStore, fixtures: Bool = false) -> Bool {
+        if optInModules.contains(id) { return fixtures || settings.get(enabledModules).contains(id.rawValue) }
+        return !settings.get(disabledModules).contains(id.rawValue)
+    }
+
+    @MainActor
+    public static func setEnabled(_ id: ModuleID, _ on: Bool, in settings: SettingsStore) {
+        let optIn = optInModules.contains(id)
+        let key = optIn ? enabledModules : disabledModules
+        var listed = Set(settings.get(key))
+        // One list names what is on, the other what is off.
+        if on == optIn { listed.insert(id.rawValue) } else { listed.remove(id.rawValue) }
+        settings.set(key, listed.sorted())
+    }
 }

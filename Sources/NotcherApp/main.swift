@@ -1,9 +1,11 @@
 import AppKit
 import CalendarModule
 import ClaudeAgentsModule
+import BuildsModule
 import ClipboardModule
 import ColourModule
 import ConvertModule
+import DevServersModule
 import NotchCore
 import NotchUI
 import NowPlayingModule
@@ -68,6 +70,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             debug.fixtures ? ClaudeAgentsModule.sample() : ClaudeAgentsModule.live(),
             debug.fixtures ? ScreenshotsModule.sample() : ScreenshotsModule.live(),
             debug.fixtures ? ColourModule.sample() : ColourModule.live(),
+            debug.fixtures ? DevServersModule.sample() : DevServersModule.live(),
+            debug.fixtures ? BuildsModule.sample() : BuildsModule.live(),
         ]
         self.converter = convert
         self.shelf = shelf
@@ -104,12 +108,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// A stopped module does no work at all (a disabled Clipboard must not keep recording), and the shared
     /// services of a disabled module are withdrawn so nothing hands it work.
     private func syncModules() {
-        let disabled = withObservationTracking { Set(settings.get(CoreSettings.disabledModules)) } onChange: { [weak self] in
+        let fixtures = debug.fixtures
+        let enabledIDs = withObservationTracking {
+            Set(modules.map(\.id).filter { CoreSettings.isEnabled($0, in: settings, fixtures: fixtures) })
+        } onChange: { [weak self] in
             Task { @MainActor in self?.syncModules() }
         }
         for module in modules {
             let id = module.id
-            let enabled = !disabled.contains(id.rawValue)
+            let enabled = enabledIDs.contains(id)
             if enabled, !running.contains(id) {
                 running.insert(id)
                 let context = ModuleContext(

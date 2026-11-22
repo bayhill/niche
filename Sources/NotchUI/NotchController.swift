@@ -484,7 +484,7 @@ public final class NotchController: NotchControlling {
 
     /// Recomputed on every use: modules can be enabled or disabled at any time.
     private var enabledModules: [any NotchModule] {
-        PanelContent.enabled(allModules, disabled: settings.get(CoreSettings.disabledModules))
+        allModules.filter { CoreSettings.isEnabled($0.id, in: settings, fixtures: debug.fixtures) }
     }
 
     // MARK: - Modules and activities
@@ -512,6 +512,7 @@ public final class NotchController: NotchControlling {
                 _ = module.placement
             }
             _ = settings.get(CoreSettings.disabledModules)
+            _ = settings.get(CoreSettings.enabledModules)
         } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self, self.running else { return }

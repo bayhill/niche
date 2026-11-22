@@ -80,12 +80,8 @@ private struct GeneralPane: View {
             Section("Modules") {
                 ForEach(model.modules, id: \.id) { module in
                     Toggle(isOn: Binding(
-                        get: { !model.settings.get(CoreSettings.disabledModules).contains(module.id.rawValue) },
-                        set: { on in
-                            var off = Set(model.settings.get(CoreSettings.disabledModules))
-                            if on { off.remove(module.id.rawValue) } else { off.insert(module.id.rawValue) }
-                            model.settings.set(CoreSettings.disabledModules, off.sorted())
-                        }
+                        get: { CoreSettings.isEnabled(module.id, in: model.settings) },
+                        set: { CoreSettings.setEnabled(module.id, $0, in: model.settings) }
                     )) { Label(module.title, systemImage: module.symbol) }
                 }
                 Text("A module that is switched off stops completely and disappears from the notch.").font(.footnote).foregroundStyle(.secondary)
