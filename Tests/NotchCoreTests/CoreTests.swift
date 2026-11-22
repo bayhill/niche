@@ -386,13 +386,14 @@ private func activity(_ id: String, _ p: LiveActivity.Priority, updated: TimeInt
         let started = ContinuousClock.now
         // The shell prints the pid of a background sleep that inherits stdout, then waits for it.
         let result = await ProcessCommandRunner().run(
-            URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", "sleep 30 & echo $!; wait"], timeout: .milliseconds(300)
+            URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", "sleep 120 & echo $!; wait"], timeout: .milliseconds(300)
         )
         let elapsed = ContinuousClock.now - started
         let pid = try #require(pid_t(result.text.trimmingCharacters(in: .whitespacesAndNewlines)))
         defer { kill(pid, SIGKILL) }
         #expect(result.timedOut && !result.succeeded)
-        #expect(elapsed < .seconds(2))
+        // Far below the two minutes the grandchild sleeps; generous, because a shared CI machine can stall for seconds.
+        #expect(elapsed < .seconds(40))
         #expect(kill(pid, 0) == 0, "the grandchild is still running, so the pipe was still held open")
 
         kill(pid, SIGKILL)

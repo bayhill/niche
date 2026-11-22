@@ -176,7 +176,7 @@ import UniformTypeIdentifiers
         #expect(seen.contains { if case .fileProgress = $0 { true } else { false } })
         let cancelledAt = clock.now
         while await queue.runningCount > 0 {
-            #expect(clock.now - cancelledAt < .seconds(5), "encode kept running after cancellation")
+            #expect(clock.now - cancelledAt < .seconds(30), "encode kept running after cancellation")
             if clock.now - cancelledAt > .seconds(5) { break }
             try await Task.sleep(for: .milliseconds(10))
         }

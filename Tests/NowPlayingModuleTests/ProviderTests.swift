@@ -200,9 +200,10 @@ private let locations = AdapterLocations(
 
     @Test func runTimesOut() async {
         let start = ContinuousClock.now
-        let r = await FoundationProcessLauncher().run(URL(filePath: "/bin/sleep"), arguments: ["5"], timeout: .milliseconds(200))
+        let r = await FoundationProcessLauncher().run(URL(filePath: "/bin/sleep"), arguments: ["120"], timeout: .milliseconds(200))
         #expect(r.timedOut)
-        #expect(ContinuousClock.now - start < .seconds(3))
+        // Far below the two minutes the command would take; generous, because a shared CI machine can stall for seconds.
+        #expect(ContinuousClock.now - start < .seconds(40))
     }
 
     @Test func launchStreamsAndTerminates() async throws {
