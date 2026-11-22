@@ -30,7 +30,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsWindow: SettingsWindowController?
     private var statusItem: NSStatusItem?
 
-    /// True when launched with flags meant for screenshots and automated checks: no onboarding, no login item.
+    /// True when launched with flags meant for screenshots and automated checks: no onboarding.
     private var isDebugRun: Bool { debug.forceState != nil || debug.demo || debug.fixtures }
 
     /// First-run setup (login item, welcome) only makes sense for the installed app, never for `swift run`.
@@ -137,12 +137,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         services.playback = running.contains(.nowPlaying) ? playback : nil
     }
 
-    /// The user asked for Notcher to start with the Mac: switch that on once, then leave the choice to Settings.
+    /// Shows the welcome note once. Nothing is switched on here: launch at login stays off until it is chosen in Settings.
     private func firstRunIfNeeded() {
-        if !settings.get(AppSettings.loginItemInitialized) {
-            LoginItem.setEnabled(true)
-            settings.set(AppSettings.loginItemInitialized, true)
-        }
         if !settings.get(AppSettings.onboarded) { settingsWindow?.show() }
     }
 
