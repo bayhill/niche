@@ -2,6 +2,7 @@ import Foundation
 import NotchCore
 import NotchCoreTesting
 import Testing
+import UniformTypeIdentifiers
 
 private func activity(_ id: String, _ p: LiveActivity.Priority, updated: TimeInterval = 0, expires: TimeInterval? = nil) -> LiveActivity {
     LiveActivity(
@@ -200,18 +201,50 @@ private func activity(_ id: String, _ p: LiveActivity.Priority, updated: TimeInt
 }
 
 @MainActor @Suite struct FileDragTests {
-    @Test func providerCarriesTheFilesOwnName() throws {
+    @Test func providerOffersTheFilesNameWithoutItsExtension() throws {
         let env = try TestEnvironment()
         defer { env.cleanUp() }
         let url = try TestImage.write(TestImage.solid(), to: env.root.appending(path: "Shot 2026-11-21 at 19.13.31.png"))
         let provider = FileDrag.provider(for: url)
-        #expect(provider.suggestedName == "Shot 2026-11-21 at 19.13.31.png")
-        #expect(provider.registeredTypeIdentifiers.contains("public.png"))
+        // The receiver appends ".png" for the registered type; a name that already ends in it lands as ".png.png".
+        #expect(provider.suggestedName == "Shot 2026-11-21 at 19.13.31")
+        #expect(provider.registeredTypeIdentifiers.first == "public.png")
     }
 
     @Test func missingFileStillGetsAName() {
         let provider = FileDrag.provider(for: URL(fileURLWithPath: "/nonexistent/report.pdf"))
-        #expect(provider.suggestedName == "report.pdf")
+        #expect(provider.suggestedName == "report")
+    }
+
+    @Test(arguments: [
+        ("Marketing & Demo Stuff.pdf", "Marketing & Demo Stuff"),
+        ("IMG_0772.HEIC", "IMG_0772"),
+        ("photo.jpg", "photo"),
+        ("archive.tar.gz", "archive.tar"),
+        ("Shot 2026-11-21 at 19.13.31.png", "Shot 2026-11-21 at 19.13.31"),
+        // Nothing is appended to a name without an extension, so it is offered whole.
+        ("Makefile", "Makefile"),
+        ("v1.2 notes", "v1.2 notes"),
+        (".hidden", ".hidden"),
+        ("trailing.", "trailing."),
+    ])
+    func suggestedNameDropsOnlyARealExtension(name: String, expected: String) {
+        #expect(FileDrag.suggestedName(for: URL(fileURLWithPath: "/tmp/\(name)")) == expected)
+    }
+
+    /// The extension the receiver appends comes from the provider's first registered type. Offered name plus that
+    /// extension must be the file's own name (case aside), never a doubled one.
+    @Test(arguments: ["Marketing & Demo Stuff.pdf", "IMG_0772.HEIC", "hero.webp", "archive.tar.gz", "data.xyz"])
+    func offeredNamePlusTheTypesExtensionIsTheOriginalName(name: String) throws {
+        let env = try TestEnvironment()
+        defer { env.cleanUp() }
+        let url = env.root.appending(path: name)
+        try Data([1]).write(to: url)
+        let provider = FileDrag.provider(for: url)
+        let type = try #require(provider.registeredTypeIdentifiers.first.flatMap { UTType($0) })
+        let appended = try #require(type.preferredFilenameExtension)
+        let landed = "\(try #require(provider.suggestedName)).\(appended)"
+        #expect(landed.lowercased() == name.lowercased())
     }
 }
 

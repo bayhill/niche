@@ -272,7 +272,14 @@ public enum FileDrag {
     /// after its type ("PNG image.png"); carrying the file's own name keeps it.
     public static func provider(for url: URL) -> NSItemProvider {
         let provider = NSItemProvider(contentsOf: url) ?? NSItemProvider()
-        provider.suggestedName = url.lastPathComponent
+        provider.suggestedName = suggestedName(for: url)
         return provider
+    }
+
+    /// The name to offer for `url`: its own name without the extension. The receiver appends the extension of the
+    /// file's type itself, so offering "report.pdf" lands as "report.pdf.pdf". A name with no extension is offered
+    /// whole, since nothing is appended to it.
+    public static func suggestedName(for url: URL) -> String {
+        url.pathExtension.isEmpty ? url.lastPathComponent : url.deletingPathExtension().lastPathComponent
     }
 }
