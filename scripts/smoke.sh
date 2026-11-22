@@ -1,6 +1,7 @@
 #!/bin/bash
 # Builds, installs and checks Notcher end to end, capturing each notch state with sample data.
-# Needs an unlocked display and Screen Recording permission for the terminal.
+# Needs an unlocked display and Screen Recording permission for the terminal. Replaces the installed app and restarts
+# it many times; it is left quit at the end.
 #   scripts/smoke.sh [output-dir]
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -11,7 +12,12 @@ mkdir -p "$OUT"
 cd "$ROOT"
 
 echo "==> Tests"
-swift test 2>&1 | grep -E "Test run with [0-9]{2,}|✘|error:" || true
+if ! swift test > "$OUT/test.log" 2>&1; then
+  grep -E "✘|error:" "$OUT/test.log" | head -40
+  echo "tests failed; the full log is $OUT/test.log" >&2
+  exit 1
+fi
+grep -E "Test run with [0-9]{2,}" "$OUT/test.log" | tail -3
 
 echo "==> Bundle"
 scripts/bundle.sh > "$OUT/bundle.log" 2>&1 || { cat "$OUT/bundle.log"; exit 1; }

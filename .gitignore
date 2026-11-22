@@ -10,3 +10,12 @@ DerivedData/
 *.pem
 .worktrees/
 .claude/
+brag-output*/
+.vscode/
+.idea/
+*.swp
+.env
+.env.*
+*.cer
+*.p8
+*.mobileprovision

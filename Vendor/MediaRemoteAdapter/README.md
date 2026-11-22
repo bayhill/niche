@@ -7,7 +7,7 @@ Vendored unchanged: `bin/mediaremote-adapter.pl`, `include/`, `src/` (adapter fr
 `MediaRemoteAdapterTestClient` used by the `test` command), `LICENSE`. Not vendored: CMake files, editor config,
 dev scripts, README badges.
 
-`build.sh <outdir>` replaces the upstream CMake build (cmake is not available here). It compiles with the Xcode
+`build.sh <outdir>` replaces the upstream CMake build, so that building Notcher does not need CMake. It compiles with the Xcode
 toolchain's `clang` (universal arm64 + x86_64) and writes:
 
 - `<outdir>/MediaRemoteAdapter.framework` - versioned framework, loaded by the script, never linked. The test client

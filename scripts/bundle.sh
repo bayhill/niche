@@ -1,6 +1,6 @@
 #!/bin/bash
 # Builds Notcher, assembles Notcher.app by hand (no Xcode project), signs it and installs it.
-#   scripts/bundle.sh            release build, install to ~/Applications
+#   scripts/bundle.sh            release build, install to ~/Applications (quits a running Notcher and replaces the installed copy)
 #   CONFIG=debug scripts/bundle.sh
 #   INSTALL=0 scripts/bundle.sh  build/Notcher.app only
 #   NOTCHER_SIGN_IDENTITY="My Identity" scripts/bundle.sh
@@ -63,12 +63,15 @@ if [ -x Vendor/MediaRemoteAdapter/build.sh ]; then
   cp "$OUT/mediaremote-adapter.pl" "$APP/Contents/Resources/"
 fi
 
-if security find-certificate -c "$IDENTITY" > /dev/null 2>&1; then SIGN="$IDENTITY"; else SIGN="-"; echo "warning: '$IDENTITY' not found; ad-hoc signing (permissions will not persist across rebuilds)"; fi
+# An identity is a certificate with its private key; a certificate alone cannot sign. A self-signed one is listed as
+# not trusted, which is fine for running on this Mac, so the "valid only" filter is not used.
+if security find-identity -p codesigning 2>/dev/null | grep -qF "\"$IDENTITY\""; then SIGN="$IDENTITY"; else SIGN="-"; echo "warning: '$IDENTITY' not found; ad-hoc signing (permissions will not persist across rebuilds)"; fi
 echo "==> Signing with: $SIGN"
 find "$APP/Contents/Frameworks" -maxdepth 1 -mindepth 1 -print0 | while IFS= read -r -d '' nested; do
   codesign --force --sign "$SIGN" "$nested"
 done
-codesign --force --sign "$SIGN" --identifier "$BUNDLE_ID" "$APP"
+# Hardened runtime: another process cannot load code into the app to borrow its Calendar, folder or Automation access.
+codesign --force --sign "$SIGN" --identifier "$BUNDLE_ID" --options runtime --entitlements Resources/Notcher.entitlements "$APP"
 codesign --verify --strict "$APP"
 
 if [ "$INSTALL" = "1" ]; then

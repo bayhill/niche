@@ -1,13 +1,27 @@
 # Contributing to Notcher
 
 Notcher is a SwiftPM-only macOS 26 app (Swift 6 language mode, no Xcode project). `scripts/bundle.sh` assembles,
-signs and installs `Notcher.app`; `scripts/run.sh [flags]` restarts it.
+signs and installs `Notcher.app`; `scripts/run.sh [flags]` restarts it. Both act on the copy in `~/Applications`:
+`bundle.sh` quits a running Notcher and replaces the installed app (`INSTALL=0 scripts/bundle.sh` only builds
+`build/Notcher.app`).
+
+## Changes and reports
+
+Open an issue before a large change, so the direction can be agreed first. A pull request should stay inside one
+module where it can, pass `swift build` and `swift test` with zero warnings, and say what was checked by hand at the
+real notch. Report a security problem privately; see `SECURITY.md`.
+
+Prose, comments and user-facing text use British spelling ("colour", "licence"). Identifiers follow Apple's APIs
+where they wrap them (`Color`, `Tokens.Colors`).
+
+A fork that is installed next to the original should change `CFBundleIdentifier` in `Resources/Info.plist` (the one
+place it is defined), or the two copies share preferences and permissions.
 
 ## Layout
 
 `Sources/NotchCore` is the contract and the design kit. `Sources/NotchUI` is the notch window. Each `Sources/*Module`
-target is one feature and depends on `NotchCore` only; modules never import each other and talk through the service
-protocols in `NotchCore`. `Sources/NotcherApp` wires everything together. The README has the full table.
+target is one feature and depends on `NotchCore` only (`ConvertModule` also on `ImageEngine`); modules never import
+each other and talk through the service protocols in `NotchCore`. `Sources/NotcherApp` wires everything together. The README has the full table.
 
 A change to one module should stay inside that module's target and its tests. If the contract in `NotchCore` is
 wrong or missing something, change it there, deliberately, rather than working around it with a private copy.
@@ -19,9 +33,9 @@ wrong or missing something, change it there, deliberately, rather than working a
 2. **Design kit only.** Views are built from `GlassCard` (including `ambient:` for Now Playing), `GlassButton`,
    `GlassIconButton`, `RowButtonStyle`, `SectionHeader`, `ResultRow`, `EmptyState`, `ProgressRing`, `SpinnerRing`,
    `PositionBar`, `StatusDot`, `EqualizerBars`, `CountdownText`, `Text(...).notchStyle(_)`, `Format`, `Tokens`,
-   `PanelLayout`, and `Motion`. `design-system/` describes the kit, the content rules (sentence case, no "you"/"we",
-   no exclamation marks, empty states that name the next action) and the intended module layouts; the Swift kit is
-   the source of truth where they differ. No literal colours, fonts, corner radii, materials or animation curves in module code.
+   `PanelLayout`, and `Motion`. No literal colours, fonts, corner radii, materials or animation curves in module code.
+   Text follows the content rules: sentence case, no "you" or "we", no exclamation marks, and an empty state names
+   the next action.
    Animate with `.motion(Motion.x, value:)`, `Motion.animate`, `.motionAppear(index)`; SF Symbol effects and
    `contentTransition(.numericText())` are encouraged. Keep it simple: few controls, generous spacing.
 3. **A dashboard card fills the frame it is given** (`PanelLayout.cardSize(for:)`); a page gets `PanelLayout.pageSize`.
@@ -54,3 +68,6 @@ wrong or missing something, change it there, deliberately, rather than working a
     swift build                      # everything
     swift test --filter <Target>Tests
     scripts/bundle.sh && scripts/run.sh --force-state expanded --fixtures
+    scripts/smoke.sh                 # tests, bundle, a conversion and a capture of every state
+
+`scripts/smoke.sh` needs an unlocked display and Screen Recording permission for the terminal, and leaves the app quit.
