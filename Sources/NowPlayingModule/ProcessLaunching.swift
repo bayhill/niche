@@ -50,6 +50,8 @@ public struct FoundationProcessLauncher: ProcessLaunching {
         for await chunk in child.output { stdout.append(chunk) }
         let status = await child.waitForExit()
         timer.cancel()
+        // The last of stderr can arrive a moment after the exit; without it an error message would be lost.
+        await child.waitForStderr(atMost: .milliseconds(500))
         return ProcessResult(status: status, stdout: stdout, stderr: child.collectedStderr, timedOut: child.timedOut)
     }
 }
@@ -59,6 +61,8 @@ final class FoundationChildProcess: ChildProcess {
     private let exit: AsyncStream<Int32>
     private let process: Mutex<Process>
     private let stderrData: DataBox
+    /// Finishes when stderr has been read to its end (at once when stderr is not captured).
+    private let stderrEnd: AsyncStream<Void>
     private let timedOutFlag = Mutex(false)
 
     init(executable: URL, arguments: [String], captureStderr: Bool) throws {
@@ -85,21 +89,40 @@ final class FoundationChildProcess: ChildProcess {
             exitContinuation.finish()
         }
         let stderrBox = DataBox()
+        let (stderrEnd, stderrEndContinuation) = AsyncStream.makeStream(of: Void.self)
         if captureStderr {
             let stderr = Pipe()
             process.standardError = stderr
             stderr.fileHandleForReading.readabilityHandler = { handle in
                 let data = handle.availableData
-                if data.isEmpty { handle.readabilityHandler = nil } else { stderrBox.value.withLock { $0.append(data) } }
+                if data.isEmpty {
+                    handle.readabilityHandler = nil
+                    stderrEndContinuation.finish()
+                } else {
+                    stderrBox.value.withLock { $0.append(data) }
+                }
             }
         } else {
             process.standardError = FileHandle.nullDevice
+            stderrEndContinuation.finish()
         }
         try process.run()
         self.output = output
         self.exit = exit
         self.process = Mutex(process)
         self.stderrData = stderrBox
+        self.stderrEnd = stderrEnd
+    }
+
+    /// Waits until stderr has been read to its end, but no longer than `limit` (a grandchild may keep it open).
+    func waitForStderr(atMost limit: Duration) async {
+        let end = stderrEnd
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { for await _ in end {} }
+            group.addTask { try? await Task.sleep(for: limit) }
+            await group.next()
+            group.cancelAll()
+        }
     }
 
     func waitForExit() async -> Int32 {
