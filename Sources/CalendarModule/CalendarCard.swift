@@ -107,6 +107,9 @@ struct CalendarSettings: View {
                     Picker("Show beside the notch", selection: settings.binding(CalendarModule.leadMinutes)) {
                         ForEach(CalendarModule.leadChoices, id: \.self) { Text("\($0) minutes before").tag($0) }
                     }
+                    Picker("Nudge before a meeting", selection: settings.binding(CalendarModule.nudgeMinutes)) {
+                        ForEach(CalendarModule.nudgeChoices, id: \.self) { Text($0 == 0 ? "Off" : "\($0) minutes before").tag($0) }
+                    }
                 }
             } else {
                 Text("Available once the module is running")
@@ -115,6 +118,7 @@ struct CalendarSettings: View {
         .formStyle(.grouped)
         .onAppear { calendars = module.calendars() }
         .onChange(of: settings?.get(CalendarModule.leadMinutes)) { module.refresh() }
+        .onChange(of: settings?.get(CalendarModule.nudgeMinutes)) { module.refresh() }
         .onChange(of: settings?.get(CalendarModule.excludedCalendars)) { module.refresh() }
     }
 

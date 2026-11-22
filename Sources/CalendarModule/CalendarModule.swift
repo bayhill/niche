@@ -13,6 +13,9 @@ public final class CalendarModule: NotchModule {
     /// Calendar identifiers the user switched off. New calendars are included by default.
     public static let excludedCalendars = SettingsKey("calendar.excludedCalendars", default: [String]())
     public static let leadChoices = [5, 10, 15, 30]
+    /// Minutes before a meeting that the notch grows by itself to say it is time to go. 0 is off.
+    public static let nudgeMinutes = SettingsKey("calendar.nudgeMinutes", default: 5)
+    public static let nudgeChoices = [0, 2, 5, 10, 15]
 
     public let id = ModuleID.calendar
     public let title = "Calendar"
@@ -23,6 +26,7 @@ public final class CalendarModule: NotchModule {
     public private(set) var access: CalendarAccess
     public private(set) var meeting: NextMeeting?
     public private(set) var liveActivity: LiveActivity?
+    public private(set) var nudge: Nudge?
     /// Join button gets the accent once the countdown has started.
     public private(set) var isImminent = false
     /// Clock reading at the last refresh, for formatting.
@@ -33,6 +37,12 @@ public final class CalendarModule: NotchModule {
     @ObservationIgnored private let sleep: @Sendable (Duration) async throws -> Void
     @ObservationIgnored private let openURL: @MainActor (URL) -> Void
     @ObservationIgnored private var settings: SettingsStore?
+    /// Overrides the `nudgeMinutes` setting (the sample uses it so its meeting 12 minutes away nudges).
+    @ObservationIgnored private let nudgeLeadOverride: TimeInterval?
+    /// Nudge ids the user acted on or dismissed. In memory only; pruned to current candidates on every refresh.
+    @ObservationIgnored private(set) var answered: Set<String> = []
+    /// The event behind `nudge`, for its link.
+    @ObservationIgnored private var nudgedEvent: CalendarEvent?
     @ObservationIgnored private var running = false
     @ObservationIgnored private var timer: Task<Void, Never>?
     @ObservationIgnored private var wakeObserver: (any NSObjectProtocol)?
@@ -44,23 +54,29 @@ public final class CalendarModule: NotchModule {
         source: any EventSource, now: @escaping @MainActor () -> Date = { .now },
         sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
         openURL: @escaping @MainActor (URL) -> Void = { NSWorkspace.shared.open($0) },
-        settings: SettingsStore? = nil
+        settings: SettingsStore? = nil, nudgeLead: TimeInterval? = nil
     ) {
         self.source = source; self.now = now; self.sleep = sleep; self.openURL = openURL; self.settings = settings
+        nudgeLeadOverride = nudgeLead
         access = source.access
         refreshedAt = now()
     }
 
     public static func live() -> CalendarModule { CalendarModule(source: EventKitSource()) }
 
-    /// Sample meetings relative to now, already loaded. No EventKit.
+    /// Sample meetings relative to now, already loaded. No EventKit. Nudges 15 minutes ahead whatever the setting
+    /// says, so the design review 12 minutes away shows a nudge.
     public static func sample() -> CalendarModule {
-        let module = CalendarModule(source: SampleEventSource.demo(), openURL: { _ in })
+        let module = CalendarModule(source: SampleEventSource.demo(), openURL: { _ in }, nudgeLead: 15 * 60)
         module.refresh()
         return module
     }
 
     public var lead: TimeInterval { TimeInterval((settings?.get(Self.leadMinutes) ?? Self.leadMinutes.defaultValue) * 60) }
+    /// How long before a meeting the nudge appears; 0 when off.
+    public var nudgeLead: TimeInterval {
+        nudgeLeadOverride ?? TimeInterval((settings?.get(Self.nudgeMinutes) ?? Self.nudgeMinutes.defaultValue) * 60)
+    }
 
     public func start(_ context: ModuleContext) async {
         guard !running else { return }
@@ -99,6 +115,22 @@ public final class CalendarModule: NotchModule {
         openURL(url)
     }
 
+    public func performNudgeAction(_ id: Nudge.ID) {
+        guard nudge?.id == id else { return }
+        if let url = nudgedEvent?.link?.url { openURL(url) }
+        answer(id)
+    }
+
+    public func dismissNudge(_ id: Nudge.ID) {
+        guard nudge?.id == id else { return }
+        answer(id)
+    }
+
+    private func answer(_ id: Nudge.ID) {
+        answered.insert(id)
+        refresh()
+    }
+
     public func openPrivacySettings() {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars") { openURL(url) }
     }
@@ -123,7 +155,8 @@ public final class CalendarModule: NotchModule {
         refreshedAt = t
         access = source.access
         guard access == .granted else {
-            set(meeting: nil, activity: nil, imminent: false)
+            nudgedEvent = nil
+            set(meeting: nil, activity: nil, imminent: false, nudge: nil)
             if running { schedule(at: t.addingTimeInterval(60)) }
             return
         }
@@ -133,13 +166,18 @@ public final class CalendarModule: NotchModule {
         let next = NextMeetingSelector.select(candidates: candidates, now: t)
         let activity = MeetingActivity.make(candidates: candidates, now: t, lead: lead)
         let imminent = next.map { $0.isNow || $0.event.start.timeIntervalSince(t) <= lead } ?? false
-        set(meeting: next, activity: activity, imminent: imminent)
-        if running { schedule(at: CalendarSchedule.nextRefresh(after: t, candidates: candidates, lead: lead)) }
+        let nudgeLead = nudgeLead
+        answered.formIntersection(candidates.map(MeetingNudge.id(for:)))
+        let nudged = MeetingNudge.event(candidates: candidates, now: t, lead: nudgeLead, answered: answered)
+        nudgedEvent = nudged
+        set(meeting: next, activity: activity, imminent: imminent, nudge: nudged.map { MeetingNudge.make(for: $0, now: t, lead: nudgeLead) })
+        if running { schedule(at: CalendarSchedule.nextRefresh(after: t, candidates: candidates, lead: lead, nudgeLead: nudgeLead)) }
     }
 
-    private func set(meeting next: NextMeeting?, activity: LiveActivity?, imminent: Bool) {
+    private func set(meeting next: NextMeeting?, activity: LiveActivity?, imminent: Bool, nudge newNudge: Nudge?) {
         if next != meeting { Motion.animate(Motion.morph) { meeting = next } }
         if activity != liveActivity { liveActivity = activity }
+        if newNudge != nudge { nudge = newNudge }
         if imminent != isImminent { Motion.animate(Motion.quick) { isImminent = imminent } }
     }
 

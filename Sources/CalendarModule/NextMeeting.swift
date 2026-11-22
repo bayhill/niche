@@ -80,13 +80,94 @@ public enum MeetingActivity {
     }
 }
 
+/// The nudge that makes the notch grow shortly before a meeting ("Hey buddy, time to head over"). Pure.
+///
+/// The value is equal across refreshes within a phase (before the start, after the start), so the banner is not
+/// re-rendered every minute. That includes the accessibility label, whose minute count is the lead rather than the
+/// time left: the live countdown in the banner carries the exact time.
+public enum MeetingNudge: Sendable {
+    /// Stable per meeting occurrence and start time: a meeting moved to another time nudges again.
+    public static func id(for event: CalendarEvent) -> String {
+        "calendar.nudge.\(event.id).\(Int(event.start.timeIntervalSince1970.rounded(.down)))"
+    }
+
+    /// The first candidate in its nudge window (`start - lead ..< min(end, start + nowWindow)`) that the user has not
+    /// answered. `candidates` must come from `NextMeetingSelector.candidates`. `lead <= 0` means nudges are off.
+    public static func event(candidates: [CalendarEvent], now: Date, lead: TimeInterval, answered: Set<String>) -> CalendarEvent? {
+        guard lead > 0 else { return nil }
+        return candidates.first { e in
+            now >= e.start.addingTimeInterval(-lead) && now < expiry(of: e) && !answered.contains(id(for: e))
+        }
+    }
+
+    public static func make(candidates: [CalendarEvent], now: Date, lead: TimeInterval, answered: Set<String>) -> Nudge? {
+        event(candidates: candidates, now: now, lead: lead, answered: answered).map { make(for: $0, now: now, lead: lead) }
+    }
+
+    /// The nudge for one event, whether or not it is in its window.
+    public static func make(for event: CalendarEvent, now: Date, lead: TimeInterval) -> Nudge {
+        let link = event.link
+        let trimmed = event.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = trimmed.isEmpty ? "Meeting" : trimmed
+        let message: String, label: String
+        if now < event.start {
+            let place = self.place(event.location)
+            let minutes = max(1, Int((lead / 60).rounded(.up)))
+            message = "Hey buddy, time to head " + (place.map { "to \($0)" } ?? "over")
+            label = "\(title) starts in \(minutes) minute\(minutes == 1 ? "" : "s"). Time to head \(place.map { "to \($0)" } ?? "over")."
+        } else {
+            message = "Hey buddy, it has started"
+            label = "\(title) has started."
+        }
+        return Nudge(
+            id: id(for: event), module: .calendar, symbol: link?.provider.symbol ?? "calendar", title: title,
+            message: message, countdown: event.start, actionTitle: link == nil ? nil : "Join", expiresAt: expiry(of: event),
+            accessibilityLabel: label
+        )
+    }
+
+    /// After this the meeting is no longer worth a nudge: the wing's "now" window, or the end if sooner.
+    public static func expiry(of event: CalendarEvent) -> Date {
+        min(event.end, event.start.addingTimeInterval(MeetingActivity.nowWindow))
+    }
+
+    /// The location as a place to head to, or `nil` when it is not one: empty, a link, or only the name of the
+    /// online meeting service ("Microsoft Teams Meeting"). Uses the first non-empty line; Exchange's
+    /// "Room 4; Microsoft Teams Meeting" keeps only the room.
+    public static func place(_ location: String?) -> String? {
+        guard let line = location?
+            .split(whereSeparator: \.isNewline)
+            .map({ $0.trimmingCharacters(in: .whitespaces) })
+            .first(where: { !$0.isEmpty })
+        else { return nil }
+        let parts = line.split(separator: ";")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && MeetingLinkExtractor.urls(in: $0).isEmpty && !namesProvider($0) }
+        return parts.isEmpty ? nil : parts.joined(separator: "; ")
+    }
+
+    /// Words that, alone, make a location just the name of an online meeting service.
+    static let providerWords: Set<String> = Set(
+        MeetingProvider.allCases.flatMap { $0.label.lowercased().split(separator: " ").map(String.init) }
+    ).union(["microsoft", "meeting", "online", "call", "video"])
+
+    private static func namesProvider(_ text: String) -> Bool {
+        let words = text.lowercased().split { !$0.isLetter && !$0.isNumber }
+        return !words.isEmpty && words.allSatisfy { providerWords.contains(String($0)) }
+    }
+}
+
 /// When the module should look again. Pure.
 public enum CalendarSchedule {
     /// The next instant the card or wing could change, but at least once a minute.
-    public static func nextRefresh(after now: Date, candidates: [CalendarEvent], lead: TimeInterval, maxInterval: TimeInterval = 60) -> Date {
+    /// `nudgeLead` is the nudge's lead (`0` when nudges are off); the start itself is already a boundary.
+    public static func nextRefresh(
+        after now: Date, candidates: [CalendarEvent], lead: TimeInterval, nudgeLead: TimeInterval = 0, maxInterval: TimeInterval = 60
+    ) -> Date {
         let boundaries = candidates.flatMap { e in
             [
-                e.start.addingTimeInterval(-lead), e.start, e.start.addingTimeInterval(MeetingActivity.nowWindow),
+                e.start.addingTimeInterval(-lead), e.start.addingTimeInterval(-max(0, nudgeLead)), e.start,
+                e.start.addingTimeInterval(MeetingActivity.nowWindow),
                 e.start.addingTimeInterval(NextMeetingSelector.inProgressWindow), e.end,
             ]
         }
