@@ -76,9 +76,9 @@ public final class FolderScreenshotSource: ScreenshotSource {
         guard self.deliver == nil else { return }
         self.deliver = deliver
         gathered = false
-        let folder = folder()
-        watched = folder
-        watch(folder)
+        watched = folder()
+        // The first read happens off the main actor (in `scan`): it is where macOS may stop to ask for access to
+        // the folder, and the app must stay responsive while that question is on screen. Watching starts after it.
         scan(after: [.zero])
     }
 
@@ -96,7 +96,8 @@ public final class FolderScreenshotSource: ScreenshotSource {
     }
 
     /// Asks the kernel to say when entries in the folder change. A folder that cannot be opened is simply not
-    /// watched: the first scan then reports nothing, and `start` after `stop` tries again.
+    /// watched: the first scan then reports nothing, and `start` after `stop` tries again. Only called once the
+    /// folder has been read off the main actor, so opening it here never waits on a permission prompt.
     private func watch(_ folder: URL) {
         let descriptor = open(folder.path, O_EVTONLY)
         guard descriptor >= 0 else { return }
@@ -133,9 +134,16 @@ public final class FolderScreenshotSource: ScreenshotSource {
                 let since = self.now().addingTimeInterval(-self.lookback)
                 let shots = await Task.detached(priority: .utility) { Self.scan(folder, since: since) }.value
                 guard !Task.isCancelled, let deliver = self.deliver else { return }
+                let startsWatching = self.watcher == nil
+                if startsWatching { self.watch(folder) }
                 let initial = !self.gathered
                 self.gathered = true
                 deliver(ScreenshotBatch(screenshots: shots, isInitial: initial))
+                // A screenshot saved between that read and the watch starting would otherwise go unseen.
+                if startsWatching, self.watcher != nil, delays.count == 1 {
+                    self.scan(after: [self.settle])
+                    return
+                }
             }
         }
     }
