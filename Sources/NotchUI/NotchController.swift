@@ -12,6 +12,10 @@ public enum NotchSettings {
     public static let openOnHover = SettingsKey("notch.openOnHover", default: false)
     /// ⌃⌥N toggles the panel.
     public static let hotkeyEnabled = SettingsKey("notch.hotkeyEnabled", default: true)
+    /// The panel opens on the tab that was used last rather than on Home.
+    public static let reopenLastPage = SettingsKey("notch.reopenLastPage", default: true)
+    /// The tab used last (a module id), empty for Home. Written by the notch, not shown in Settings.
+    public static let lastPage = SettingsKey("notch.lastPage", default: "")
 }
 
 /// Owns the notch window: placement, click-through, hover/drag/drop detection, the hotkey and the expanded panel.
@@ -97,6 +101,9 @@ public final class NotchController: NotchControlling {
         running = true
         if services.notch == nil { services.notch = self }
         machine.openOnHover = settings.get(NotchSettings.openOnHover)
+        machine.remembersPage = settings.get(NotchSettings.reopenLastPage)
+        let lastPage = settings.get(NotchSettings.lastPage)
+        machine.rememberedPage = lastPage.isEmpty ? nil : ModuleID(lastPage)
         model.onSelectPage = { [weak self] page in self?.send(.selectPage(page)) }
         model.onOpenSettings = { [weak self] in
             guard let self else { return }
@@ -161,7 +168,7 @@ public final class NotchController: NotchControlling {
         panel = nil
         container = nil
         if services.notch === self { services.notch = nil }
-        machine = NotchStateMachine(openOnHover: machine.openOnHover)
+        machine = NotchStateMachine(openOnHover: machine.openOnHover, remembersPage: machine.remembersPage, rememberedPage: machine.rememberedPage)
     }
 
     private func prewarm() {
@@ -186,6 +193,9 @@ public final class NotchController: NotchControlling {
         let before = machine
         let effects = machine.send(event, now: clock.now)
         perform(effects)
+        if before.rememberedPage != machine.rememberedPage {
+            settings.set(NotchSettings.lastPage, machine.rememberedPage?.rawValue ?? "")
+        }
         if before.visual != machine.visual { render(from: before) }
         updateHold(from: before)
     }
@@ -318,6 +328,7 @@ public final class NotchController: NotchControlling {
             guard !pinned else { break }
             if inPanel, model.layout.hits(location) {
                 guard type == .leftMouseDown else { break }
+                if model.layout.hitsPage(location) { send(.pageUsed) }
                 let files = (machine.state == .activity || machine.state == .hover) ? (model.activity?.files ?? []) : []
                 let press = BarPress(at: location, hasFiles: !files.isEmpty)
                 if press.onPress == .click { send(.click) } else { self.press = press }
@@ -486,6 +497,11 @@ public final class NotchController: NotchControlling {
             model.modules = modules
             // The open page's module was disabled or stopped being a page: fall back to Home.
             if machine.page != nil, PanelContent.pageModule(machine.page, in: modules) == nil { send(.selectPage(nil)) }
+            // The remembered page went the same way: the next opening is Home.
+            if let remembered = machine.rememberedPage, PanelContent.pageModule(remembered, in: modules) == nil {
+                machine.rememberedPage = nil
+                settings.set(NotchSettings.lastPage, "")
+            }
         }
         refreshActivity()
         refreshNudge()
@@ -599,6 +615,7 @@ public final class NotchController: NotchControlling {
         let openOnHover = settings.get(NotchSettings.openOnHover)
         let hotkeyEnabled = settings.get(NotchSettings.hotkeyEnabled)
         if openOnHover != machine.openOnHover { send(.setOpenOnHover(openOnHover)) }
+        machine.remembersPage = settings.get(NotchSettings.reopenLastPage)
         if hotkeyEnabled, toggleKey == nil {
             toggleKey = HotKey(keyCode: kVK_ANSI_N, modifiers: HotKey.controlOption) { [weak self] in self?.send(.hotkey) }
             if toggleKey == nil { log.error("could not register ⌃⌥N") }
@@ -609,6 +626,7 @@ public final class NotchController: NotchControlling {
         withObservationTracking {
             _ = settings.get(NotchSettings.openOnHover)
             _ = settings.get(NotchSettings.hotkeyEnabled)
+            _ = settings.get(NotchSettings.reopenLastPage)
         } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self, self.running else { return }
@@ -704,7 +722,8 @@ public final class NotchController: NotchControlling {
         }
         machine = NotchStateMachine(
             state: state, page: page, hasActivity: model.activity != nil, hasNudge: model.nudge != nil,
-            openOnHover: machine.openOnHover, dropTargeted: targeted
+            openOnHover: machine.openOnHover, dropTargeted: targeted,
+            remembersPage: machine.remembersPage, rememberedPage: machine.rememberedPage
         )
         render(from: before)
     }

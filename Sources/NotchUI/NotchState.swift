@@ -52,6 +52,8 @@ public enum NotchEvent: Sendable, Equatable {
     case toggle
     /// A page icon in the band (`nil` = Home).
     case selectPage(ModuleID?)
+    /// A click or the start of a drag in the open page's content, below the band: the page was put to use.
+    case pageUsed
     /// Whether the arbiter currently has an activity to show.
     case activityChanged(Bool)
     /// Whether `NudgeArbiter` currently has a nudge to show.
@@ -114,6 +116,11 @@ public struct NotchStateMachine: Sendable, Equatable {
     /// the bar mid-drag does not end hover until the drag is over.
     public private(set) var ownDragInFlight = false
     public var openOnHover: Bool
+    /// Opening without naming a page lands on `rememberedPage` rather than Home.
+    public var remembersPage: Bool
+    /// The page last put to use (`pageUsed`), `nil` for Home. Choosing Home in the band forgets it. A page that was
+    /// only looked at is not remembered.
+    public var rememberedPage: ModuleID?
     /// Pending timers and when they are due.
     public private(set) var deadlines: [NotchTimer: NotchInstant] = [:]
     /// A drag interrupted the expanded panel; cancelling the drag brings it back as it was.
@@ -122,10 +129,11 @@ public struct NotchStateMachine: Sendable, Equatable {
 
     public init(
         state: NotchState = .closed, page: ModuleID? = nil, hasActivity: Bool = false, hasNudge: Bool = false,
-        openOnHover: Bool = false, dropTargeted: Bool = false
+        openOnHover: Bool = false, dropTargeted: Bool = false, remembersPage: Bool = false, rememberedPage: ModuleID? = nil
     ) {
         self.state = state; self.page = page; self.hasActivity = hasActivity; self.hasNudge = hasNudge
         self.openOnHover = openOnHover
+        self.remembersPage = remembersPage; self.rememberedPage = rememberedPage
         self.dropTargeted = state == .drop && dropTargeted
     }
 
@@ -135,10 +143,14 @@ public struct NotchStateMachine: Sendable, Equatable {
             && a.openOnHover == b.openOnHover && a.ownDragInFlight == b.ownDragInFlight
             && a.deadlines == b.deadlines && a.resume?.page == b.resume?.page && a.resume?.transient == b.resume?.transient
             && a.lateDropUntil == b.lateDropUntil
+            && a.remembersPage == b.remembersPage && a.rememberedPage == b.rememberedPage
     }
 
     /// Where the notch returns to when nothing is going on: a pending nudge, else the activity, else nothing.
     public var restState: NotchState { hasNudge ? .nudge : hasActivity ? .activity : .closed }
+
+    /// The page a click, a hover or the hotkey opens on.
+    public var landingPage: ModuleID? { remembersPage ? rememberedPage : nil }
 
     /// The parts that change what is drawn.
     public struct Visual: Equatable, Sendable {
@@ -189,7 +201,7 @@ public struct NotchStateMachine: Sendable, Equatable {
             switch (timer, state) {
             case (.dwell, .closed), (.dwell, .activity):
                 guard pointerInside else { break }
-                if openOnHover { expand(page: nil, opening: .hover, now: now, &fx) } else { go(.hover, &fx) }
+                if openOnHover { expand(page: landingPage, opening: .hover, now: now, &fx) } else { go(.hover, &fx) }
             case (.leave, .expanded), (.idle, .expanded):
                 if transient && !pointerInside { go(restState, &fx) }
             case (.dropGrace, .drop):
@@ -200,7 +212,7 @@ public struct NotchStateMachine: Sendable, Equatable {
 
         case .click:
             switch state {
-            case .closed, .activity, .hover: expand(page: nil, opening: .click, now: now, &fx)
+            case .closed, .activity, .hover: expand(page: landingPage, opening: .click, now: now, &fx)
             case .expanded:
                 if transient { transient = false; cancel(.leave, &fx); cancel(.idle, &fx) }
             // The nudge's own buttons take its clicks; a click on its body must not open the panel under them.
@@ -217,7 +229,7 @@ public struct NotchStateMachine: Sendable, Equatable {
             switch state {
             case .expanded: go(restState, &fx)
             case .drop: break
-            case .closed, .activity, .hover, .nudge: expand(page: nil, opening: .request, now: now, &fx)
+            case .closed, .activity, .hover, .nudge: expand(page: landingPage, opening: .request, now: now, &fx)
             }
 
         case .expand(let target):
@@ -231,7 +243,13 @@ public struct NotchStateMachine: Sendable, Equatable {
             if state == .drop { resume = nil } else if state != restState { go(restState, &fx) }
 
         case .selectPage(let target):
-            if state == .expanded { page = target }
+            guard state == .expanded else { break }
+            page = target
+            // Going Home is a choice in itself: the next opening lands there too.
+            if target == nil { rememberedPage = nil }
+
+        case .pageUsed:
+            if state == .expanded { rememberedPage = page }
 
         case .activityChanged(let value):
             hasActivity = value

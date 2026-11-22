@@ -40,6 +40,9 @@ public struct NotchLayout: Sendable, Equatable {
 
     /// Hit test with inclusive edges, so the pointer pinned against the top of the screen still counts.
     public func hits(_ point: CGPoint) -> Bool { !hitRect.isNull && NotchGeometry.contains(hitRect, point) }
+
+    /// Whether `point` (global) is in the open panel's content: below the band with the page icons.
+    public func hitsPage(_ point: CGPoint) -> Bool { state == .expanded && hits(point) && point.y < hitRect.maxY - bandHeight }
 }
 
 public enum NotchGeometry {

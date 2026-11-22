@@ -171,6 +171,10 @@ private struct NotchSettingsRows: View {
     var body: some View {
         Toggle("Open the panel by hovering over the notch", isOn: settings.binding(NotchSettings.openOnHover))
         Toggle("Open the panel with ⌃⌥N", isOn: settings.binding(NotchSettings.hotkeyEnabled))
+        Toggle(isOn: settings.binding(NotchSettings.reopenLastPage)) {
+            Text("Open the panel on the tab used last")
+            Text("A tab that was only looked at is not remembered. Home opens otherwise.")
+        }
     }
 }
 

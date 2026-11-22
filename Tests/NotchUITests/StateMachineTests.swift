@@ -235,6 +235,90 @@ struct StateMachineTests {
         #expect(d.machine.page == .clipboard)
     }
 
+    // MARK: The tab used last
+
+    @Test func opensOnThePageUsedLast() {
+        var d = Driver(NotchStateMachine(remembersPage: true))
+        d.send(.click)
+        #expect(d.machine.page == nil)
+        d.send(.selectPage(.shelf))
+        d.send(.pageUsed)
+        #expect(d.machine.rememberedPage == .shelf)
+        d.send(.clickOutside)
+        // Every way of opening without naming a page lands there.
+        d.send(.click)
+        #expect(d.state == .expanded && d.machine.page == .shelf)
+        d.send(.escape)
+        d.send(.hotkey)
+        #expect(d.machine.page == .shelf)
+        d.send(.toggle)
+        d.machine.openOnHover = true
+        d.send(.pointerEntered)
+        d.wait(1)
+        #expect(d.state == .expanded && d.machine.page == .shelf)
+    }
+
+    @Test func aPageOnlyLookedAtIsNotRemembered() {
+        var d = Driver(NotchStateMachine(remembersPage: true, rememberedPage: .shelf))
+        d.send(.click)
+        d.send(.selectPage(.clipboard))
+        d.send(.clickOutside)
+        d.send(.click)
+        #expect(d.machine.page == .shelf)
+    }
+
+    @Test func choosingHomeForgetsThePage() {
+        var d = Driver(NotchStateMachine(remembersPage: true, rememberedPage: .shelf))
+        d.send(.click)
+        d.send(.selectPage(nil))
+        #expect(d.machine.rememberedPage == nil)
+        d.send(.clickOutside)
+        d.send(.click)
+        #expect(d.machine.page == nil)
+        // Using Home after using a page does the same.
+        d.send(.selectPage(.shelf))
+        d.send(.pageUsed)
+        d.send(.selectPage(.clipboard))
+        d.send(.expand(page: nil))
+        d.send(.pageUsed)
+        #expect(d.machine.rememberedPage == nil)
+    }
+
+    @Test func withTheSettingOffThePanelOpensOnHome() {
+        var d = Driver()
+        d.send(.click)
+        d.send(.selectPage(.shelf))
+        d.send(.pageUsed)
+        d.send(.clickOutside)
+        d.send(.click)
+        #expect(d.machine.page == nil)
+        // The page is still noted, so switching the setting on takes effect at once.
+        d.send(.clickOutside)
+        d.machine.remembersPage = true
+        #expect(d.machine.landingPage == .shelf)
+        d.send(.click)
+        #expect(d.machine.page == .shelf)
+    }
+
+    @Test func aNamedPageWinsOverTheRememberedOne() {
+        var d = Driver(NotchStateMachine(remembersPage: true, rememberedPage: .shelf))
+        d.send(.expand(page: .clipboard))
+        #expect(d.machine.page == .clipboard)
+        d.send(.collapse)
+        d.send(.expand(page: nil))
+        #expect(d.machine.page == nil)
+        #expect(d.machine.rememberedPage == .shelf)
+    }
+
+    @Test func pageUsedIsIgnoredWhenNotExpanded() {
+        var d = Driver(NotchStateMachine(remembersPage: true, rememberedPage: .shelf))
+        for state in [NotchState.closed, .activity, .hover, .nudge, .drop] {
+            d.machine = NotchStateMachine(state: state, remembersPage: true, rememberedPage: .shelf)
+            d.send(.pageUsed)
+            #expect(d.machine.rememberedPage == .shelf)
+        }
+    }
+
     @Test func selectPageIsIgnoredWhenNotExpanded() {
         var d = Driver()
         d.send(.selectPage(.shelf))

@@ -654,3 +654,18 @@ struct FrameStatsTests {
         #expect(stats.worst == 0)
     }
 }
+
+@Suite struct PageHitTests {
+    @Test func thePageIsBelowTheBand() {
+        let l = NotchGeometry.layout(metrics: .mbp14MoreSpace, state: .expanded, hasActivity: true)
+        let band = l.hitRect.maxY - l.bandHeight
+        #expect(l.hitsPage(CGPoint(x: l.hitRect.midX, y: l.hitRect.midY)))
+        #expect(l.hitsPage(CGPoint(x: l.hitRect.midX, y: band - 1)))
+        // The page icons live in the band: choosing one is not using the page.
+        #expect(!l.hitsPage(CGPoint(x: l.hitRect.midX, y: band + 1)))
+        #expect(!l.hitsPage(CGPoint(x: l.hitRect.midX, y: l.hitRect.maxY)))
+        #expect(!l.hitsPage(CGPoint(x: l.hitRect.midX, y: l.hitRect.minY - 1)))
+        let hover = NotchGeometry.layout(metrics: .mbp14MoreSpace, state: .hover, hasActivity: true)
+        #expect(!hover.hitsPage(CGPoint(x: hover.hitRect.midX, y: hover.hitRect.midY)))
+    }
+}
