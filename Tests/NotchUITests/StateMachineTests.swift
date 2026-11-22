@@ -450,6 +450,228 @@ struct StateMachineTests {
         }
     }
 
+    // MARK: Nudge
+
+    @Test func restStateIsTheNudgeThenTheActivityThenNothing() {
+        #expect(NotchStateMachine().restState == .closed)
+        #expect(NotchStateMachine(hasActivity: true).restState == .activity)
+        #expect(NotchStateMachine(hasNudge: true).restState == .nudge)
+        #expect(NotchStateMachine(hasActivity: true, hasNudge: true).restState == .nudge)
+    }
+
+    @Test func aNudgeGrowsTheNotchFromRestAndFromHover() {
+        for setup in [NotchState.closed, .activity, .hover] {
+            var d = Driver(NotchStateMachine(state: setup, hasActivity: setup != .closed))
+            d.send(.nudgeChanged(true))
+            #expect(d.state == .nudge, "\(setup)")
+            #expect(d.machine.hasNudge)
+            #expect(d.machine.deadlines.isEmpty)
+        }
+    }
+
+    @Test func aNudgeDuringTheDwellCancelsIt() {
+        var d = Driver()
+        d.send(.pointerEntered)
+        d.now = at(0.05)
+        #expect(d.send(.nudgeChanged(true)) == [.cancel(.dwell)])
+        d.wait(1)
+        #expect(d.state == .nudge)
+    }
+
+    @Test func thePointerComingAndGoingNeitherSwellsNorClosesTheNudge() {
+        for openOnHover in [false, true] {
+            var d = Driver(NotchStateMachine(openOnHover: openOnHover))
+            d.send(.nudgeChanged(true))
+            #expect(d.send(.pointerEntered) == [])
+            #expect(d.machine.pointerInside)
+            d.wait(1)
+            #expect(d.state == .nudge)
+            #expect(d.send(.pointerExited) == [])
+            #expect(!d.machine.pointerInside)
+            d.wait(1)
+            #expect(d.state == .nudge)
+        }
+    }
+
+    @Test func clicksEscapeAndClickOutsideLeaveTheNudgeAlone() {
+        for event in [NotchEvent.click, .escape, .clickOutside, .collapse, .selectPage(.shelf), .ownDragBegan] {
+            var d = Driver(NotchStateMachine(hasActivity: true))
+            d.send(.nudgeChanged(true))
+            #expect(d.send(event) == [], "\(event)")
+            #expect(d.state == .nudge, "\(event)")
+            #expect(!d.machine.ownDragInFlight)
+        }
+    }
+
+    @Test func hotkeyFromTheNudgeOpensThePanelAndClosingItReturnsToTheNudge() {
+        var d = Driver(NotchStateMachine(hasActivity: true))
+        d.send(.nudgeChanged(true))
+        #expect(d.send(.hotkey) == [.schedule(.idle, at: d.now + NotchStateMachine.idleDelay)])
+        #expect(d.state == .expanded && d.machine.transient && d.machine.page == nil)
+        d.send(.hotkey)
+        #expect(d.state == .nudge)
+        #expect(d.machine.deadlines.isEmpty)
+        // Ignored, the hotkey panel closes by itself back onto the nudge.
+        d.send(.toggle)
+        #expect(d.state == .expanded)
+        d.wait(4)
+        #expect(d.state == .nudge)
+        // The API opens a page from it too.
+        d.send(.expand(page: .shelf))
+        #expect(d.state == .expanded && d.machine.page == .shelf)
+        d.send(.collapse)
+        #expect(d.state == .nudge)
+    }
+
+    @Test func aNudgeArrivingWhileExpandedShowsWhenThePanelCloses() {
+        for close in [NotchEvent.escape, .clickOutside, .hotkey, .toggle, .collapse] {
+            var d = Driver(NotchStateMachine(state: .expanded, page: .shelf, hasActivity: true))
+            #expect(d.send(.nudgeChanged(true)) == [])
+            #expect(d.state == .expanded && d.machine.page == .shelf, "\(close)")
+            #expect(d.machine.hasNudge)
+            d.send(close)
+            #expect(d.state == .nudge, "\(close)")
+        }
+    }
+
+    @Test func aTransientPanelClosingByItselfLandsOnThePendingNudge() {
+        var d = Driver(NotchStateMachine(openOnHover: true))
+        d.send(.pointerEntered)
+        d.wait(0.12)
+        #expect(d.state == .expanded && d.machine.transient)
+        d.send(.nudgeChanged(true))
+        d.send(.pointerExited)
+        d.wait(0.3)
+        #expect(d.state == .nudge)
+    }
+
+    @Test func aNudgeClearedWhileExpandedLeavesNothingBehind() {
+        var d = Driver(NotchStateMachine(state: .expanded, hasActivity: true))
+        d.send(.nudgeChanged(true))
+        d.send(.nudgeChanged(false))
+        #expect(d.state == .expanded)
+        #expect(!d.machine.hasNudge)
+        d.send(.escape)
+        #expect(d.state == .activity)
+    }
+
+    @Test func aNudgeArrivingDuringADropShowsAfterIt() {
+        // Dropped.
+        var dropped = Driver(NotchStateMachine(hasActivity: true))
+        dropped.send(.activityChanged(true))
+        dropped.send(.dragNear)
+        dropped.send(.nudgeChanged(true))
+        #expect(dropped.state == .drop)
+        dropped.send(.dropTargetEntered)
+        dropped.send(.dropped)
+        #expect(dropped.state == .nudge)
+
+        // Cancelled.
+        var cancelled = Driver()
+        cancelled.send(.dragNear)
+        cancelled.send(.nudgeChanged(true))
+        cancelled.send(.dragFar)
+        #expect(cancelled.state == .nudge)
+
+        // Released over the target, the grace runs out.
+        var released = Driver()
+        released.send(.dragNear)
+        released.send(.dropTargetEntered)
+        released.send(.nudgeChanged(true))
+        released.send(.dragEnded)
+        #expect(released.state == .drop)
+        released.wait(0.3)
+        #expect(released.state == .nudge)
+        // A late drop still lands and leaves the nudge up.
+        #expect(released.machine.acceptsDrop(now: released.now))
+        released.send(.dropped)
+        #expect(released.state == .nudge)
+    }
+
+    @Test func aDropCancelledOverTheExpandedPanelReturnsToThePanelThenToTheNudge() {
+        var d = Driver(NotchStateMachine(state: .expanded, page: .shelf))
+        d.send(.dragNear)
+        d.send(.nudgeChanged(true))
+        d.send(.dragFar)
+        #expect(d.state == .expanded && d.machine.page == .shelf)
+        d.send(.escape)
+        #expect(d.state == .nudge)
+    }
+
+    @Test func aDragFromTheNudgeOpensTheDropTargetWithNothingToResume() {
+        var d = Driver(NotchStateMachine(hasActivity: true))
+        d.send(.nudgeChanged(true))
+        d.send(.dragNear)
+        #expect(d.state == .drop)
+        d.send(.dragFar)
+        #expect(d.state == .nudge)
+        d.send(.dragNear)
+        d.send(.dropTargetEntered)
+        d.send(.dropped)
+        #expect(d.state == .nudge)
+    }
+
+    @Test func activityChangesWhileNudgingApplyWhenItIsAnswered() {
+        var d = Driver()
+        d.send(.nudgeChanged(true))
+        d.send(.activityChanged(true))
+        #expect(d.state == .nudge && d.machine.hasActivity)
+        d.send(.activityChanged(false))
+        d.send(.activityChanged(true))
+        #expect(d.state == .nudge)
+        d.send(.nudgeChanged(false))
+        #expect(d.state == .activity)
+        d.send(.nudgeChanged(true))
+        d.send(.activityChanged(false))
+        d.send(.nudgeChanged(false))
+        #expect(d.state == .closed)
+    }
+
+    @Test func aRepeatedNudgeChangeIsHarmless() {
+        var d = Driver()
+        d.send(.nudgeChanged(true))
+        #expect(d.send(.nudgeChanged(true)) == [])
+        #expect(d.state == .nudge)
+        d.send(.nudgeChanged(false))
+        #expect(d.send(.nudgeChanged(false)) == [])
+        #expect(d.state == .closed)
+    }
+
+    @Test func aNudgeTakesOverTheBarMidwayThroughDraggingItsFilesOut() {
+        var m = NotchStateMachine(state: .hover, hasActivity: true)
+        m.send(.pointerEntered, now: t0)
+        m.send(.ownDragBegan, now: t0)
+        m.send(.nudgeChanged(true), now: t0)
+        #expect(m.state == .nudge)
+        // Still our own drag: it never opens the drop target.
+        #expect(m.send(.dragNear, now: t0) == [])
+        m.send(.ownDragEnded(accepted: false), now: t0)
+        #expect(m.state == .nudge && !m.ownDragInFlight)
+    }
+
+    @Test func theNudgeFlagChangesWhatIsDrawnAndTheValue() {
+        let a = NotchStateMachine(state: .expanded)
+        var b = a
+        b.send(.nudgeChanged(true), now: t0)
+        #expect(a != b)
+        #expect(a.visual != b.visual)
+        #expect(a.state == b.state)
+    }
+
+    @Test func aNudgeArrivesOnlyWhenItsIdChanges() {
+        let sample = Nudge.sample()
+        var updated = sample
+        updated.message = "Starting now"
+        var other = sample
+        other.id = "other"
+        #expect(NudgeArrival.isNew(sample, after: nil))
+        #expect(NudgeArrival.isNew(other, after: sample))
+        #expect(!NudgeArrival.isNew(updated, after: sample))
+        #expect(!NudgeArrival.isNew(sample, after: sample))
+        #expect(!NudgeArrival.isNew(nil, after: sample))
+        #expect(!NudgeArrival.isNew(nil, after: nil))
+    }
+
     // MARK: Full table
 
     /// Every state × every event, from a clean machine in that state (no pointer inside, no pending timers).
@@ -460,20 +682,25 @@ struct StateMachineTests {
             ("toggle", .toggle), ("page", .selectPage(.clipboard)), ("act+", .activityChanged(true)),
             ("act-", .activityChanged(false)), ("near", .dragNear), ("far", .dragFar), ("ended", .dragEnded),
             ("in", .dropTargetEntered), ("out", .dropTargetExited), ("dropped", .dropped),
+            ("nudge+", .nudgeChanged(true)), ("nudge-", .nudgeChanged(false)),
         ]
-        // Expected state after each event, per starting state, with hasActivity = true (rest = .activity).
+        // Expected state after each event, per starting state, with hasActivity = true (rest = .activity) and no
+        // nudge pending, except in `.nudge`, which starts with one (rest = .nudge).
         let expected: [NotchState: [NotchState]] = [
-            //            enter      exit       click      outside    esc        hotkey     expand     collapse   toggle     page       act+       act-     near   far        ended      in     out    dropped
-            .closed:   [.closed,   .closed,   .expanded, .closed,   .closed,   .expanded, .expanded, .closed,   .expanded, .closed,   .activity, .closed, .drop, .closed,   .closed,   .closed, .closed, .closed],
-            .activity: [.activity, .activity, .expanded, .activity, .activity, .expanded, .expanded, .activity, .expanded, .activity, .activity, .closed, .drop, .activity, .activity, .activity, .activity, .activity],
-            .hover:    [.hover,    .activity, .expanded, .hover,    .activity, .expanded, .expanded, .activity, .expanded, .hover,    .hover,    .hover,  .drop, .hover,    .hover,    .hover, .hover, .hover],
-            .drop:     [.drop,     .drop,     .drop,     .drop,     .drop,     .drop,     .drop,     .drop,     .drop,     .drop,     .drop,     .drop,   .drop, .activity, .activity, .drop,  .drop,  .activity],
-            .expanded: [.expanded, .expanded, .expanded, .activity, .activity, .activity, .expanded, .activity, .activity, .expanded, .expanded, .expanded, .drop, .expanded, .expanded, .expanded, .expanded, .expanded],
+            //            enter      exit       click      outside    esc        hotkey     expand     collapse   toggle     page       act+       act-     near   far        ended      in     out    dropped    nudge+     nudge-
+            .closed:   [.closed,   .closed,   .expanded, .closed,   .closed,   .expanded, .expanded, .closed,   .expanded, .closed,   .activity, .closed, .drop, .closed,   .closed,   .closed, .closed, .closed,   .nudge,    .closed],
+            .activity: [.activity, .activity, .expanded, .activity, .activity, .expanded, .expanded, .activity, .expanded, .activity, .activity, .closed, .drop, .activity, .activity, .activity, .activity, .activity, .nudge, .activity],
+            .hover:    [.hover,    .activity, .expanded, .hover,    .activity, .expanded, .expanded, .activity, .expanded, .hover,    .hover,    .hover,  .drop, .hover,    .hover,    .hover, .hover, .hover,    .nudge,    .hover],
+            .nudge:    [.nudge,    .nudge,    .nudge,    .nudge,    .nudge,    .expanded, .expanded, .nudge,    .expanded, .nudge,    .nudge,    .nudge,  .drop, .nudge,    .nudge,    .nudge,  .nudge,  .nudge,    .nudge,    .activity],
+            .drop:     [.drop,     .drop,     .drop,     .drop,     .drop,     .drop,     .drop,     .drop,     .drop,     .drop,     .drop,     .drop,   .drop, .activity, .activity, .drop,  .drop,  .activity, .drop,      .drop],
+            .expanded: [.expanded, .expanded, .expanded, .activity, .activity, .activity, .expanded, .activity, .activity, .expanded, .expanded, .expanded, .drop, .expanded, .expanded, .expanded, .expanded, .expanded, .expanded, .expanded],
         ]
+        #expect(Set(expected.keys) == Set(NotchState.allCases))
         for (start, row) in expected {
+            #expect(row.count == events.count, "\(start.rawValue)")
             for ((name, event), want) in zip(events, row) {
                 // `.closed` with an activity is not a resting state, so it starts without one.
-                var m = NotchStateMachine(state: start, hasActivity: start != .closed)
+                var m = NotchStateMachine(state: start, hasActivity: start != .closed, hasNudge: start == .nudge)
                 m.send(event, now: t0)
                 #expect(m.state == want, "\(start.rawValue) + \(name)")
             }

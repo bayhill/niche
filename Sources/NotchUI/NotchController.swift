@@ -40,6 +40,9 @@ public final class NotchController: NotchControlling {
     private var timerGenerations: [NotchTimer: Int] = [:]
     private let clock = ContinuousClock()
     private var expiryTask: Task<Void, Never>?
+    private var nudgeExpiryTask: Task<Void, Never>?
+    /// Shown by `--force-state nudge` and `--demo` when no module has a nudge. Made once, so its countdown runs.
+    private let sampleNudge = Nudge.sample()
     private var demoTask: Task<Void, Never>?
     private var toggleKey: HotKey?
     private var frameMonitor: FrameRateMonitor?
@@ -100,6 +103,9 @@ public final class NotchController: NotchControlling {
             self.services.openSettings?(nil)
             self.send(.collapse)
         }
+        // The module clears its nudge; observing `nudge` brings the notch back to rest.
+        model.onNudgeAction = { [weak self] nudge in self?.nudgeOwner(nudge)?.performNudgeAction(nudge.id) }
+        model.onNudgeDismiss = { [weak self] nudge in self?.nudgeOwner(nudge)?.dismissNudge(nudge.id) }
 
         let panel = NotchPanel()
         let container = NotchContainerView(frame: .zero)
@@ -142,6 +148,7 @@ public final class NotchController: NotchControlling {
         for task in timerTasks.values { task.cancel() }
         timerTasks.removeAll()
         expiryTask?.cancel()
+        nudgeExpiryTask?.cancel()
         demoTask?.cancel()
         statusTask?.cancel()
         holdTask?.cancel()
@@ -255,7 +262,7 @@ public final class NotchController: NotchControlling {
 
     static func animation(from: NotchState, to: NotchState) -> Animation {
         switch to {
-        case .expanded, .drop: from.isOpen ? Motion.morph : Motion.open
+        case .expanded, .drop, .nudge: from.isOpen ? Motion.morph : Motion.open
         case .hover: Motion.open
         case .activity: from == .closed ? Motion.open : Motion.close
         case .closed: Motion.close
@@ -481,9 +488,11 @@ public final class NotchController: NotchControlling {
             if machine.page != nil, PanelContent.pageModule(machine.page, in: modules) == nil { send(.selectPage(nil)) }
         }
         refreshActivity()
+        refreshNudge()
         withObservationTracking {
             for module in allModules {
                 _ = module.liveActivity
+                _ = module.nudge
                 _ = module.placement
             }
             _ = settings.get(CoreSettings.disabledModules)
@@ -525,6 +534,44 @@ public final class NotchController: NotchControlling {
                 self?.refreshActivity()
             }
         }
+    }
+
+    /// Picks the nudge on screen. Unlike most activities, nudges show over fullscreen apps too.
+    private func refreshNudge() {
+        let now = Date()
+        let candidates = enabledModules.compactMap(\.nudge)
+        var chosen = NudgeArbiter.select(candidates, now: now)
+        // `--force-state nudge` and `--demo` always have something to show.
+        if chosen == nil, pinned, debug.demo || debug.forceState == NotchState.nudge.rawValue { chosen = sampleNudge }
+        if chosen != model.nudge {
+            let arrived = NudgeArrival.isNew(chosen, after: model.nudge)
+            Motion.animate(Motion.morph) { model.nudge = chosen }
+            if arrived, let chosen { announce(chosen) }
+        }
+        if !pinned { send(.nudgeChanged(chosen != nil)) }
+
+        nudgeExpiryTask?.cancel()
+        if let next = candidates.compactMap(\.expiresAt).filter({ $0 > now }).min() {
+            nudgeExpiryTask = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(next.timeIntervalSinceNow + 0.01))
+                guard !Task.isCancelled else { return }
+                self?.refreshNudge()
+            }
+        }
+    }
+
+    /// A new nudge: one tick, and VoiceOver reads it out even though focus is elsewhere.
+    private func announce(_ nudge: Nudge) {
+        Haptics.tick()
+        NSAccessibility.post(
+            element: NSApp as Any, notification: .announcementRequested,
+            userInfo: [.announcement: nudge.accessibilityLabel, .priority: NSAccessibilityPriorityLevel.high.rawValue]
+        )
+    }
+
+    /// The enabled module that published `nudge`, which is the one to answer it.
+    private func nudgeOwner(_ nudge: Nudge) -> (any NotchModule)? {
+        enabledModules.first { $0.id == nudge.module }
     }
 
     /// Re-reads the status items right of the notch. Only matters while some wing text is asking for room.
@@ -656,7 +703,8 @@ public final class NotchController: NotchControlling {
             model.hint = DropRouter.hint(for: sample, among: enabledModules) ?? .fallback
         }
         machine = NotchStateMachine(
-            state: state, page: page, hasActivity: model.activity != nil, openOnHover: machine.openOnHover, dropTargeted: targeted
+            state: state, page: page, hasActivity: model.activity != nil, hasNudge: model.nudge != nil,
+            openOnHover: machine.openOnHover, dropTargeted: targeted
         )
         render(from: before)
     }
@@ -664,7 +712,8 @@ public final class NotchController: NotchControlling {
     private func startDemo() {
         let firstPage = PanelContent.pages(enabledModules).first?.id
         let steps: [(NotchState, ModuleID?, Bool)] = [
-            (.closed, nil, false), (.activity, nil, false), (.hover, nil, false), (.drop, nil, false), (.drop, nil, true),
+            (.closed, nil, false), (.activity, nil, false), (.hover, nil, false), (.nudge, nil, false), (.drop, nil, false),
+            (.drop, nil, true),
             (.activity, nil, false), (.expanded, nil, false), (.expanded, firstPage, false), (.expanded, nil, false),
             (.activity, nil, false),
         ]

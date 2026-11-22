@@ -12,6 +12,8 @@ final class NotchViewModel {
     /// `HoverHint.isVisible` for the current state and settings.
     var hintVisible = false
     var activity: LiveActivity?
+    /// `NudgeArbiter`'s pick, shown while `state == .nudge`.
+    var nudge: Nudge?
     var hint: DropHint = .fallback
     var layout: NotchLayout
     /// Enabled modules, in the order given to the controller.
@@ -23,6 +25,8 @@ final class NotchViewModel {
 
     @ObservationIgnored var onSelectPage: (ModuleID?) -> Void = { _ in }
     @ObservationIgnored var onOpenSettings: () -> Void = {}
+    @ObservationIgnored var onNudgeAction: (Nudge) -> Void = { _ in }
+    @ObservationIgnored var onNudgeDismiss: (Nudge) -> Void = { _ in }
 
     init(layout: NotchLayout) { self.layout = layout }
 }
@@ -41,7 +45,11 @@ struct NotchRootView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Notcher")
-        .accessibilityHint(model.state == .expanded ? "" : HoverHint.text(hasFiles: !(model.activity?.files.isEmpty ?? true)))
+        // A click on the nudge does not expand, so it gets no "click to expand" hint either.
+        .accessibilityHint(
+            model.state == .expanded || model.state == .nudge
+                ? "" : HoverHint.text(hasFiles: !(model.activity?.files.isEmpty ?? true))
+        )
         .opacity(layout.surfaceOpacity)
         .offset(x: layout.centerOffset)
         .frame(width: layout.windowFrame.width, height: layout.windowFrame.height, alignment: .top)
@@ -150,17 +158,27 @@ private struct NotchContentView: View {
                     .id(activity.id)
                     .transition(.notchContent(reduceMotion: reduceMotion))
             }
+            if model.state == .nudge, let nudge = model.nudge {
+                NudgeView(
+                    nudge: nudge, bandHeight: layout.bandHeight,
+                    onAction: { model.onNudgeAction(nudge) }, onDismiss: { model.onNudgeDismiss(nudge) }
+                )
+                // A different nudge replaces this one; a changed message on the same id updates in place.
+                .id(nudge.id)
+                .transition(.notchContent(reduceMotion: reduceMotion))
+            }
             if model.state == .drop {
                 DropTargetView(hint: model.hint, targeted: model.dropTargeted, bandHeight: layout.bandHeight)
                     .transition(.notchContent(reduceMotion: reduceMotion))
             }
-            if model.warming && model.state != .expanded && model.state != .drop {
+            if model.warming && !model.state.isOpen {
                 Group {
                     ExpandedView(
                         model: model, notchWidth: notch.width,
                         bodyWidth: NotchGeometry.bodyWidth(.expanded, notch: notch, hasActivity: true), bandHeight: layout.bandHeight
                     )
                     DropTargetView(hint: model.hint, targeted: false, bandHeight: layout.bandHeight)
+                    NudgeView(nudge: model.nudge ?? .sample(), bandHeight: layout.bandHeight, onAction: {}, onDismiss: {})
                 }
                 .opacity(0)
                 .allowsHitTesting(false)
@@ -330,6 +348,57 @@ private struct DropTargetView: View {
             .motionAppear(0)
         }
         .frame(width: PanelLayout.dropSize.width, height: bandHeight + PanelLayout.dropSize.height)
+    }
+}
+
+// MARK: - Nudge
+
+/// A module's `Nudge` below the band: symbol, title over message, countdown, the action and Dismiss, in one card
+/// that keeps `PanelLayout.nudgeSize` whatever the text (lines truncate, the card never grows).
+struct NudgeView: View {
+    let nudge: Nudge
+    let bandHeight: CGFloat
+    let onAction: () -> Void
+    let onDismiss: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// The symbol column, matching the drop target's.
+    static let symbolWidth: CGFloat = 32
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Color.clear.frame(height: bandHeight)
+            GlassCard(padding: Tokens.Spacing.m) {
+                HStack(spacing: Tokens.Spacing.m) {
+                    Image(systemName: nudge.symbol)
+                        .font(NotchTextStyle.display.font)
+                        .imageScale(.large)
+                        .foregroundStyle(Tokens.Colors.accent)
+                        .symbolEffect(.breathe, options: .repeating, isActive: !reduceMotion)
+                        .contentTransition(.symbolEffect(.replace))
+                        .frame(width: Self.symbolWidth)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(nudge.title).notchStyle(.title).lineLimit(1).truncationMode(.tail)
+                        Text(nudge.message).notchStyle(.caption).lineLimit(1).truncationMode(.tail)
+                    }
+                    .contentTransition(.opacity)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(nudge.accessibilityLabel)
+                    Spacer(minLength: 0)
+                    if let countdown = nudge.countdown {
+                        CountdownText(to: countdown).lineLimit(1).fixedSize()
+                    }
+                    if let actionTitle = nudge.actionTitle {
+                        GlassButton(actionTitle, prominence: .accent, action: onAction).fixedSize()
+                    }
+                    GlassIconButton("xmark", label: "Dismiss", action: onDismiss)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .padding(EdgeInsets(top: Tokens.Spacing.xs, leading: Tokens.Spacing.m, bottom: Tokens.Spacing.m, trailing: Tokens.Spacing.m))
+        }
+        .frame(width: PanelLayout.nudgeSize.width, height: bandHeight + PanelLayout.nudgeSize.height)
     }
 }
 

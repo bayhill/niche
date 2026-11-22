@@ -63,6 +63,41 @@ struct GeometryTests {
             == CGSize(width: PanelLayout.expandedSize.width + 2 * openTop, height: n.height + PanelLayout.expandedSize.height))
         #expect(layout(f, .expanded).bodyWidth == PanelLayout.expandedSize.width)
         #expect(layout(f, .drop).bodyWidth == PanelLayout.dropSize.width)
+        for activity in [false, true] {
+            #expect(layout(f, .nudge, activity: activity).shapeRect.size
+                == CGSize(width: PanelLayout.nudgeSize.width + 2 * openTop, height: n.height + PanelLayout.nudgeSize.height))
+            #expect(layout(f, .nudge, activity: activity).bodyWidth == PanelLayout.nudgeSize.width)
+        }
+    }
+
+    /// Laid out like the drop target, at the nudge's size: centred under the notch, open corners, full glass, and the
+    /// whole card takes the pointer (its buttons) while nothing around it does.
+    @Test(arguments: fixtures)
+    fileprivate func theNudgeHangsCentredUnderTheNotchInsideTheWindow(_ f: Fixture) {
+        let l = layout(f, .nudge)
+        #expect(l.visibleRect.midX == f.notch.midX)
+        #expect(l.visibleRect.maxY == f.metrics.frame.maxY)
+        #expect(l.visibleRect.height == f.notch.height + PanelLayout.nudgeSize.height)
+        #expect(l.bandHeight == f.notch.height)
+        #expect(l.centerOffset == layout(f, .drop).centerOffset)
+        #expect(l.topRadius == Tokens.Radius.notchOpenTop && l.bottomRadius == Tokens.Radius.notchOpenBottom)
+        #expect(l.glassAmount == 1)
+        #expect(l.surfaceOpacity == 1)
+        #expect(l.hitRect == l.visibleRect)
+        #expect(l.windowFrame.contains(l.visibleRect))
+        #expect(l.windowFrame == layout(f, .closed).windowFrame)
+        // Smaller than the panel, so opening the panel from it only ever grows the shape.
+        let expanded = layout(f, .expanded)
+        #expect(expanded.visibleRect.contains(l.visibleRect))
+        // Below the card is click-through.
+        #expect(!l.hits(CGPoint(x: l.visibleRect.midX, y: l.visibleRect.minY - 1)))
+    }
+
+    @Test func theNudgeOnTheDevMachine() {
+        let l = NotchGeometry.layout(metrics: .mbp14MoreSpace, state: .nudge, hasActivity: true)
+        // 440 + 2 × 14 wide, 38 + 76 tall, centred on the 220 pt notch at x 790...1010.
+        #expect(l.visibleRect == CGRect(x: 900 - 234, y: 1169 - 114, width: 468, height: 114))
+        #expect(l.hitRect == l.visibleRect)
     }
 
     @Test(arguments: fixtures)
@@ -117,8 +152,8 @@ struct GeometryTests {
             let l = layout(f, state)
             switch state {
             case .closed: #expect(l.hitRect == (f.claimsClosed ? f.notch : .null))
-            case .activity, .hover, .drop, .expanded:
-                // Exactly what is drawn: the whole bar, the swollen bar with its hint line, or the panel.
+            case .activity, .hover, .nudge, .drop, .expanded:
+                // Exactly what is drawn: the whole bar, the swollen bar with its hint line, the nudge, or the panel.
                 #expect(l.hitRect == l.visibleRect)
             }
             guard !l.hitRect.isNull else { continue }

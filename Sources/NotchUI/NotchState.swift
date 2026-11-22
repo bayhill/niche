@@ -12,13 +12,15 @@ public enum NotchState: String, Sendable, CaseIterable, Equatable {
     case activity
     /// The pointer dwelt on the notch: a small swell, no content.
     case hover
+    /// A module's `Nudge`, grown below the band on its own until the user answers it.
+    case nudge
     /// A file drag is near: one large drop target below the notch band.
     case drop
     /// The full panel: page icons in the band, Home or a page below.
     case expanded
 
-    /// Drop and expanded draw glass and content below the band.
-    public var isOpen: Bool { self == .drop || self == .expanded }
+    /// Nudge, drop and expanded draw glass and content below the band.
+    public var isOpen: Bool { self == .nudge || self == .drop || self == .expanded }
 }
 
 /// Timers the state machine asks its owner to run.
@@ -52,6 +54,8 @@ public enum NotchEvent: Sendable, Equatable {
     case selectPage(ModuleID?)
     /// Whether the arbiter currently has an activity to show.
     case activityChanged(Bool)
+    /// Whether `NudgeArbiter` currently has a nudge to show.
+    case nudgeChanged(Bool)
     case setOpenOnHover(Bool)
     /// A file drag that some module accepts came within reach of the notch / moved away again.
     case dragNear, dragFar
@@ -103,6 +107,8 @@ public struct NotchStateMachine: Sendable, Equatable {
     public private(set) var transient = false
     public private(set) var dropTargeted: Bool
     public private(set) var hasActivity: Bool
+    /// A nudge is pending: it is the rest state, and shows as soon as nothing more important (a drop, the panel) is up.
+    public private(set) var hasNudge: Bool
     public private(set) var pointerInside = false
     /// A drag of the activity's files out of the bar is in flight: it never opens our own drop target, and leaving
     /// the bar mid-drag does not end hover until the drag is over.
@@ -115,23 +121,24 @@ public struct NotchStateMachine: Sendable, Equatable {
     private var lateDropUntil: NotchInstant?
 
     public init(
-        state: NotchState = .closed, page: ModuleID? = nil, hasActivity: Bool = false, openOnHover: Bool = false,
-        dropTargeted: Bool = false
+        state: NotchState = .closed, page: ModuleID? = nil, hasActivity: Bool = false, hasNudge: Bool = false,
+        openOnHover: Bool = false, dropTargeted: Bool = false
     ) {
-        self.state = state; self.page = page; self.hasActivity = hasActivity; self.openOnHover = openOnHover
+        self.state = state; self.page = page; self.hasActivity = hasActivity; self.hasNudge = hasNudge
+        self.openOnHover = openOnHover
         self.dropTargeted = state == .drop && dropTargeted
     }
 
     public static func == (a: Self, b: Self) -> Bool {
         a.state == b.state && a.page == b.page && a.transient == b.transient && a.dropTargeted == b.dropTargeted
-            && a.hasActivity == b.hasActivity && a.pointerInside == b.pointerInside && a.openOnHover == b.openOnHover
-            && a.ownDragInFlight == b.ownDragInFlight
+            && a.hasActivity == b.hasActivity && a.hasNudge == b.hasNudge && a.pointerInside == b.pointerInside
+            && a.openOnHover == b.openOnHover && a.ownDragInFlight == b.ownDragInFlight
             && a.deadlines == b.deadlines && a.resume?.page == b.resume?.page && a.resume?.transient == b.resume?.transient
             && a.lateDropUntil == b.lateDropUntil
     }
 
-    /// Where the notch returns to when nothing is going on.
-    public var restState: NotchState { hasActivity ? .activity : .closed }
+    /// Where the notch returns to when nothing is going on: a pending nudge, else the activity, else nothing.
+    public var restState: NotchState { hasNudge ? .nudge : hasActivity ? .activity : .closed }
 
     /// The parts that change what is drawn.
     public struct Visual: Equatable, Sendable {
@@ -139,9 +146,12 @@ public struct NotchStateMachine: Sendable, Equatable {
         public var page: ModuleID?
         public var dropTargeted: Bool
         public var hasActivity: Bool
+        public var hasNudge: Bool
     }
 
-    public var visual: Visual { Visual(state: state, page: page, dropTargeted: dropTargeted, hasActivity: hasActivity) }
+    public var visual: Visual {
+        Visual(state: state, page: page, dropTargeted: dropTargeted, hasActivity: hasActivity, hasNudge: hasNudge)
+    }
 
     /// Whether a drop delivered now should be taken: while the target is showing, or shortly after a highlighted
     /// target gave up waiting (a slow source or a busy main thread).
@@ -158,7 +168,8 @@ public struct NotchStateMachine: Sendable, Equatable {
             switch state {
             case .closed, .activity: schedule(.dwell, at: now + Self.dwellDelay, &fx)
             case .expanded: cancel(.leave, &fx); cancel(.idle, &fx)
-            case .hover, .drop: break
+            // The nudge stays until answered: the pointer coming and going neither swells nor closes it.
+            case .hover, .nudge, .drop: break
             }
 
         case .pointerExited:
@@ -167,7 +178,7 @@ public struct NotchStateMachine: Sendable, Equatable {
             case .closed, .activity: cancel(.dwell, &fx)
             case .hover: if !ownDragInFlight { go(restState, &fx) }
             case .expanded: if transient { cancel(.idle, &fx); schedule(.leave, at: now + Self.leaveDelay, &fx) }
-            case .drop: break
+            case .nudge, .drop: break
             }
 
         case .timer(let timer):
@@ -192,7 +203,8 @@ public struct NotchStateMachine: Sendable, Equatable {
             case .closed, .activity, .hover: expand(page: nil, opening: .click, now: now, &fx)
             case .expanded:
                 if transient { transient = false; cancel(.leave, &fx); cancel(.idle, &fx) }
-            case .drop: break
+            // The nudge's own buttons take its clicks; a click on its body must not open the panel under them.
+            case .nudge, .drop: break
             }
 
         case .clickOutside:
@@ -205,14 +217,14 @@ public struct NotchStateMachine: Sendable, Equatable {
             switch state {
             case .expanded: go(restState, &fx)
             case .drop: break
-            case .closed, .activity, .hover: expand(page: nil, opening: .request, now: now, &fx)
+            case .closed, .activity, .hover, .nudge: expand(page: nil, opening: .request, now: now, &fx)
             }
 
         case .expand(let target):
             switch state {
             case .drop: resume = (target, resume?.transient ?? true)
             case .expanded: page = target
-            case .closed, .activity, .hover: expand(page: target, opening: .request, now: now, &fx)
+            case .closed, .activity, .hover, .nudge: expand(page: target, opening: .request, now: now, &fx)
             }
 
         case .collapse:
@@ -223,7 +235,18 @@ public struct NotchStateMachine: Sendable, Equatable {
 
         case .activityChanged(let value):
             hasActivity = value
-            if state == .closed || state == .activity { state = restState }
+            if state == .closed || state == .activity { go(restState, &fx) }
+
+        case .nudgeChanged(let value):
+            hasNudge = value
+            switch state {
+            // Also over the bar mid-way through dragging its files out: the drag session is the container view's
+            // and carries on; only the bar under it gives way.
+            case .closed, .activity, .hover: if value { go(.nudge, &fx) }
+            case .nudge: if !value { go(restState, &fx) }
+            // Never over a drop in progress or the open panel: the nudge appears when they end.
+            case .drop, .expanded: break
+            }
 
         case .setOpenOnHover(let value):
             openOnHover = value
@@ -236,7 +259,7 @@ public struct NotchStateMachine: Sendable, Equatable {
             case .expanded:
                 resume = (page, transient)
                 go(.drop, &fx)
-            case .closed, .activity, .hover:
+            case .closed, .activity, .hover, .nudge:
                 resume = nil
                 go(.drop, &fx)
             }
@@ -325,5 +348,15 @@ public struct NotchStateMachine: Sendable, Equatable {
     private mutating func cancel(_ timer: NotchTimer, _ fx: inout [NotchEffect]) {
         guard deadlines.removeValue(forKey: timer) != nil else { return }
         fx.append(.cancel(timer))
+    }
+}
+
+/// When a nudge counts as arriving (a haptic tick and a VoiceOver announcement) rather than updating in place.
+public enum NudgeArrival {
+    /// True when `next` is a nudge with a different id from `previous` (or there was none). A changed message or
+    /// countdown on the same id is an update, and nothing clearing is never an arrival.
+    public static func isNew(_ next: Nudge?, after previous: Nudge?) -> Bool {
+        guard let next else { return false }
+        return next.id != previous?.id
     }
 }

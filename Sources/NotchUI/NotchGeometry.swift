@@ -66,10 +66,20 @@ public enum NotchGeometry {
             let base = hasActivity ? (wings.leading, wings.trailing) : (-ear, -ear)
             let grow = hoverGrowth(hint: hoverHint).width / 2
             return (base.0 + grow, base.1 + grow)
-        case .drop, .expanded:
-            let content = state == .drop ? PanelLayout.dropSize.width : PanelLayout.expandedSize.width
+        case .nudge, .drop, .expanded:
+            let content = openContentSize(state).width
             let side = (max(content, notch.width + 2 * PanelLayout.wingWidth) - notch.width) / 2
             return (side, side)
+        }
+    }
+
+    /// Content below the band for the open states (`.zero` for the others).
+    public static func openContentSize(_ state: NotchState) -> CGSize {
+        switch state {
+        case .nudge: PanelLayout.nudgeSize
+        case .drop: PanelLayout.dropSize
+        case .expanded: PanelLayout.expandedSize
+        case .closed, .activity, .hover: .zero
         }
     }
 
@@ -98,8 +108,7 @@ public enum NotchGeometry {
         let height: CGFloat = switch state {
         case .closed, .activity: notch.height
         case .hover: notch.height + hoverGrowth(hint: hoverHint).height
-        case .drop: notch.height + PanelLayout.dropSize.height
-        case .expanded: notch.height + PanelLayout.expandedSize.height
+        case .nudge, .drop, .expanded: notch.height + openContentSize(state).height
         }
         return CGSize(width: width, height: height)
     }
