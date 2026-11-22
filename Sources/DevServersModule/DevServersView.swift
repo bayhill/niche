@@ -215,7 +215,7 @@ private struct NetworkMark: View {
     }
 }
 
-/// Press feedback for a whole row (the row scale from the design system).
+/// Press feedback for a whole row (the row scale from the design kit).
 private struct RowPressStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label

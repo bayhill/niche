@@ -221,7 +221,7 @@ private extension View {
     }
 }
 
-/// Press feedback for a whole tile (the row scale from the design system).
+/// Press feedback for a whole tile (the row scale from the design kit).
 private struct TilePressStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label

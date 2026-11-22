@@ -318,7 +318,7 @@ private struct VerdictGrid: View {
     }
 }
 
-/// Press feedback for a whole card (the row scale from the design system).
+/// Press feedback for a whole card (the row scale from the design kit).
 private struct CardPressStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
