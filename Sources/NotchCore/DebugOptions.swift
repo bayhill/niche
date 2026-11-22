@@ -4,7 +4,7 @@ import Foundation
 /// Launch arguments for development and automated verification.
 ///
 ///     --simulate-notch 220x38   draw a virtual notch of this size (also on notched displays)
-///     --force-state expanded    pin the notch state: closed | activity | hover | drop | expanded
+///     --force-state expanded    pin the notch state: closed | activity | hover | nudge | drop | expanded
 ///     --page shelf              with --force-state expanded: open this module's page
 ///     --dump-metrics            print screen metrics and the computed layout, then continue
 ///     --demo                    cycle through every state automatically

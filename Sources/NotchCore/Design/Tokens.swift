@@ -124,6 +124,8 @@ public enum PanelLayout {
     public static let hoverGrowthCompact = CGSize(width: 12, height: 6)
     /// Drop target shown while a drag is near the notch.
     public static let dropSize = CGSize(width: 420, height: 92)
+    /// A nudge (`Nudge`) shown below the notch band: one card with a symbol, two lines, a countdown and buttons.
+    public static let nudgeSize = CGSize(width: 440, height: 76)
     /// Expanded panel content, below the notch band.
     public static let expandedSize = CGSize(width: 680, height: 204)
     public static let contentInsets = EdgeInsets(top: 6, leading: 14, bottom: 14, trailing: 14)

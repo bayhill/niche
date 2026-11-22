@@ -35,6 +35,8 @@ public protocol NotchModule: AnyObject, Observable {
     var placement: PanelPlacement { get }
     /// Observed. `nil` when there is nothing worth showing beside the notch.
     var liveActivity: LiveActivity? { get }
+    /// Observed. A message that makes the notch grow on its own until the user answers it; `nil` almost always.
+    var nudge: Nudge? { get }
 
     /// Begin work. Idempotent: a second call while running is a no-op. Must return quickly; long work goes in tasks.
     func start(_ context: ModuleContext) async
@@ -51,6 +53,11 @@ public protocol NotchModule: AnyObject, Observable {
     /// Take ownership of dropped items. Only called with items this module accepted.
     func handleDrop(_ payload: DropPayload) async
 
+    /// The user clicked the nudge's action button. The module does what the label says and clears the nudge.
+    func performNudgeAction(_ id: Nudge.ID)
+    /// The user dismissed the nudge. The module clears it and never publishes this id again.
+    func dismissNudge(_ id: Nudge.ID)
+
     /// Settings pane content, or `nil` for none. Standard macOS `Form` controls bound to `SettingsStore`.
     func settingsView() -> AnyView?
 }
@@ -58,9 +65,12 @@ public protocol NotchModule: AnyObject, Observable {
 public extension NotchModule {
     var requirements: [PermissionRequirement] { [] }
     var liveActivity: LiveActivity? { nil }
+    var nudge: Nudge? { nil }
     func stop() {}
     func dropAcceptance(for item: DropItem) -> DropAcceptance { .reject }
     func dropHint(for items: [DropItem]) -> DropHint? { nil }
     func handleDrop(_ payload: DropPayload) async {}
+    func performNudgeAction(_ id: Nudge.ID) {}
+    func dismissNudge(_ id: Nudge.ID) {}
     func settingsView() -> AnyView? { nil }
 }

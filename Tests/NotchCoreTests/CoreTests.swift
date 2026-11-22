@@ -41,6 +41,35 @@ private func activity(_ id: String, _ p: LiveActivity.Priority, updated: TimeInt
     }
 }
 
+@Suite struct NudgeArbiterTests {
+    let now = Date(timeIntervalSince1970: 100)
+
+    func nudge(_ id: String, expires: TimeInterval? = nil) -> Nudge {
+        Nudge(
+            id: id, module: .calendar, symbol: "calendar", title: id, message: "m",
+            expiresAt: expires.map { Date(timeIntervalSince1970: $0) }, accessibilityLabel: id
+        )
+    }
+
+    @Test func emptyGivesNil() { #expect(NudgeArbiter.select([], now: now) == nil) }
+
+    @Test func expiredIsIgnored() {
+        #expect(NudgeArbiter.select([nudge("a", expires: 100)], now: now) == nil)
+        #expect(NudgeArbiter.select([nudge("a", expires: 100), nudge("b", expires: 101)], now: now)?.id == "b")
+    }
+
+    @Test func soonestExpiryWinsAndNoExpiryComesLast() {
+        #expect(NudgeArbiter.select([nudge("a"), nudge("b", expires: 500), nudge("c", expires: 200)], now: now)?.id == "c")
+        #expect(NudgeArbiter.select([nudge("b"), nudge("a")], now: now)?.id == "a")
+    }
+
+    @Test func sampleIsShowable() {
+        let sample = Nudge.sample(now: now)
+        #expect(NudgeArbiter.select([sample], now: now) == sample)
+        #expect(sample.actionTitle == "Join")
+    }
+}
+
 @MainActor @Suite struct DropRouterTests {
     let png = DropItem.file(URL(fileURLWithPath: "/tmp/a.png"))
     let jpg = DropItem.file(URL(fileURLWithPath: "/tmp/b.JPG"))

@@ -15,6 +15,7 @@ public final class FakeModule: NotchModule {
     public var symbol: String
     public var placement: PanelPlacement
     public var liveActivity: LiveActivity?
+    public var nudge: Nudge?
     public var requirements: [PermissionRequirement] = []
     public var acceptance: @MainActor (DropItem) -> DropAcceptance = { _ in .reject }
     public var hint: DropHint?
@@ -22,6 +23,9 @@ public final class FakeModule: NotchModule {
     public private(set) var started = false
     public private(set) var startCount = 0
     public private(set) var drops: [DropPayload] = []
+    /// Nudge ids the user acted on / dismissed, in order. Either one clears `nudge`, as a real module would.
+    public private(set) var nudgeActions: [Nudge.ID] = []
+    public private(set) var nudgeDismissals: [Nudge.ID] = []
 
     public init(
         _ id: ModuleID, title: String? = nil, symbol: String = "square.dashed", placement: PanelPlacement = .hidden,
@@ -38,6 +42,8 @@ public final class FakeModule: NotchModule {
     public func dropAcceptance(for item: DropItem) -> DropAcceptance { acceptance(item) }
     public func dropHint(for items: [DropItem]) -> DropHint? { hint }
     public func handleDrop(_ payload: DropPayload) async { drops.append(payload) }
+    public func performNudgeAction(_ id: Nudge.ID) { nudgeActions.append(id); if nudge?.id == id { nudge = nil } }
+    public func dismissNudge(_ id: Nudge.ID) { nudgeDismissals.append(id); if nudge?.id == id { nudge = nil } }
 }
 
 @MainActor
